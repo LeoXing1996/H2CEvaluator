@@ -18,6 +18,10 @@ Clone the repo and submodules with the following command.
 
 ```bash
 git clone git@github.com:LeoXing1996/H2CEvaluator.git
+
+# install pre-commit hook!
+pip install pre-commit
+pre-commit install
 ```
 
 We do not provide official `requirements.txt` now, you should install all dependencies by youself ^_^.
