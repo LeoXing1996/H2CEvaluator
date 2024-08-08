@@ -5,6 +5,9 @@ A powerful evaluator for Human2Character project. Support various metrics and di
 Supported metrics:
 * [HyperIQA](https://github.com/SSL92/hyperIQA)
 * [ArcFace](https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch).
+* [SSIM](https://github.com/VainF/pytorch-msssim)
+* [LPIPS](https://github.com/richzhang/PerceptualSimilarity)
+* [Aesthetic Score](https://github.com/christophschuhmann/improved-aesthetic-predictor)
 
 ## Under developing
 
@@ -141,4 +144,34 @@ metrics:
     enable_head_pose: true  # evaluate head pose metric
 
     enable_vis: true  # save reconstructed face
+```
+
+#### 2.4 [SSIM](./H2CEvaluator/ssim.py)
+
+Do not need prepare any model, just config like this:
+
+```yaml
+metrics:
+  - type: 'SSIM'
+```
+
+#### 2.5 [LPIPS](./H2CEvaluator/lpips.py)
+
+Do not need prepare any model, just config like this:
+
+```yaml
+metrics:
+  - type: 'LPIPS'
+```
+
+#### 2.6 [Aesthetic Score](./H2CEvaluator/aesthetic.py)
+
+Download [`sac+logos+ava1-l14-linearMSE.pth`](https://github.com/christophschuhmann/improved-aesthetic-predictor/blob/main/sac%2Blogos%2Bava1-l14-linearMSE.pth) and put it to your model directory.
+
+And the config should be like this:
+
+```yaml
+metrics:
+  - type: 'Aesthetic'
+    model_path: './models/sac+logos+ava1-l14-linearMSE.pth'
 ```
