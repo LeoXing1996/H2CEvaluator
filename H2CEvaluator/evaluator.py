@@ -155,8 +155,7 @@ class Evaluator:
                 **data,
                 **self.pipeline_kwargs,
                 generator=generator,
-            ).videos[0]  # [3, F, H, W]
-            video = video.permute(1, 0, 2, 3)  #  [F, 3, H, W]
+            ).videos[0]  # [F, 3, H, W]
 
             # build a vis dict
             extra_vis_dict = {}
