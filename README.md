@@ -85,7 +85,7 @@ output_dict = {
 
 #### Pipeline requirements
 
-The output of `pipeline` should contain `videos` attribute. And `videos` should be a `torch.Tensor` which shape is `[1, C, F, H, W]` and value range should be `[0, 1]`.
+The output of `pipeline` should contain `videos` attribute. And `videos` should be a `torch.Tensor` which shape is `[1, F, C, H, W]` and value range should be `[0, 1]`.
 
 ### 2. Config and preparation for each metric
 
