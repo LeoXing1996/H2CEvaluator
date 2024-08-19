@@ -101,13 +101,22 @@ class FID:
     def feed_one_sample(self, sample: torch.Tensor, mode: str):
         """
         Feed one sample, forward inception network, and save to the feature list.
+
+        Args:
+            sample (torch.Tensor | dict): If sample is tensor, sample should be
+                [F, C, H, W], order in RGB, range in (0, 1). Otherwise, is dict
+                with list of np.ndarray. The length of list is F and all elements
+                are un-processed, in [0, 255], [B, H, W, C].
         """
         # NOTE: input sample should be (b, c, h, w), in [0, 255] and **BGR**
+
         if mode == "fake":
             assert (
                 self._is_prepared
             ), "FID is not prepared. Please check your evaluator."
-            fake_feat = self.inception(sample)
+            fake_sample = sample / 255  # [f, c, h, w]
+            fake_sample = fake_sample[:, [2, 1, 0], ...]  # [RGB] -> [BGR]
+            fake_feat = self.inception(fake_sample)
             self.fake_feat.append(fake_feat)
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"])  # [f, h, w, c]

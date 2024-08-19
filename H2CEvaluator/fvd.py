@@ -107,15 +107,27 @@ class FVD:
     @torch.no_grad()
     def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
         """
-        Feed one sample, forward inception network, and save to the feature list.
+        Args:
+            sample (torch.Tensor | dict): If sample is tensor, sample should be
+                [F, C, H, W], order in RGB, range in (0, 1). Otherwise, is dict
+                with list of np.ndarray. The length of list is F and all elements
+                are un-processed, in [0, 255], [B, H, W, C].
         """
         # NOTE: input sample should be (b, c, f, 224, 224) in [-1, 1]
         # https://github.com/JunyaoHu/common_metrics_on_video_quality/blob/main/fvd/styleganv/fvd.py
+
         if mode == "fake":
             assert (
                 self._is_prepared
             ), "FVD is not prepared. Please check your evaluator."
-            fake_feat = self.inception(sample, **self.inception_kwargs)
+            fake_sample = sample.permute(1, 0, 2, 3) / 255  # [0, 1], [c, f, h, w]
+            fake_sample = F.interpolate(
+                fake_sample,
+                (224, 224),
+                mode="bilinear",
+            )[None]  # [1, c, f, 224, 224]
+            fake_sample = fake_sample * 2 - 1
+            fake_feat = self.inception(fake_sample, **self.inception_kwargs)
             self.fake_feat_list.append(fake_feat)
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"]) / 255
@@ -129,7 +141,7 @@ class FVD:
                 (224, 224),
                 mode="bilinear",
                 align_corners=False,
-            )[None]  # [c, f, 224, 224]
+            )[None]  # [1, c, f, 224, 224]
             driving_sample = driving_sample * 2 - 1
             real_feat = self.inception(driving_sample, **self.inception_kwargs)
             self.real_feat_list.append(real_feat)

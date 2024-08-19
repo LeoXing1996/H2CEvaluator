@@ -178,7 +178,7 @@ def main(args):
         shuffle=False,
         batch_size=1,
         collate_fn=custom_collate_fn,
-        num_workers=16,
+        num_workers=args.num_workers,
         worker_init_fn=worker_init_fn,
     )
 
@@ -297,6 +297,12 @@ if __name__ == "__main__":
         choices=["debug", "fast", "normal"],
         default="normal",
         help="Evaluation mode. If not normal, only use part of the data to evaluate the script.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=16,
+        help="Number of workers for dataloader.",
     )
     args = parser.parse_args()
     main(args)

@@ -8,6 +8,8 @@ Supported metrics:
 * [SSIM](https://github.com/VainF/pytorch-msssim)
 * [LPIPS](https://github.com/richzhang/PerceptualSimilarity)
 * [Aesthetic Score](https://github.com/christophschuhmann/improved-aesthetic-predictor)
+* [FID](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/metrics/frechet_inception_distance.py)
+* [FVD](https://github.com/wilson1yan/VideoGPT/blob/master/scripts/compute_fvd.py)
 
 ## Under developing
 
@@ -22,7 +24,10 @@ Clone the repo and submodules with the following command.
 ```bash
 git clone git@github.com:LeoXing1996/H2CEvaluator.git
 
-# install pre-commit hook!
+# install
+pip install -e .
+
+# install pre-commit hook if you want to contribute!
 pip install pre-commit
 pre-commit install
 ```

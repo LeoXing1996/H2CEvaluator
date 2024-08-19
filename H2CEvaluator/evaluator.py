@@ -128,6 +128,16 @@ class Evaluator:
 
                 metrics.append(Aesthetic(**metric_kwargs))
 
+            elif metric_type.upper() == "FID":
+                from .fid import FID
+
+                metrics.append(FID(**metric_kwargs))
+
+            elif metric_type.upper() == "FVD":
+                from .fvd import FVD
+
+                metrics.append(FVD(**metric_kwargs))
+
             else:
                 raise ValueError("Do not support metric {}".format(metric))
 
