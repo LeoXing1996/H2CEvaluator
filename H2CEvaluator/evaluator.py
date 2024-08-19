@@ -107,6 +107,21 @@ class Evaluator:
 
                 metrics.append(SMIRK(**metric_kwargs))
 
+            elif metric_type.upper() == "LPIPS":
+                from .lpips import LPIPS
+
+                metrics.append(LPIPS(**metric_kwargs))
+
+            elif metric_type.upper() == "SSIM":
+                from .ssim import SSIM
+
+                metrics.append(SSIM(**metric_kwargs))
+
+            elif metric_type.upper() == "AESTHETIC":
+                from .aesthetic import Aesthetic
+
+                metrics.append(Aesthetic(**metric_kwargs))
+
             else:
                 raise ValueError("Do not support metric {}".format(metric))
 
