@@ -67,7 +67,6 @@ class Evaluator:
         self.save_path = save_path
 
         self.pipeline_kwargs = deepcopy(pipeline_kwargs)
-        self.seed = self.pipeline_kwargs.pop("seed", None)
 
     def build_metrics(self, metric_list: METRIC_CONFIG_TYPE = None):
         if not metric_list:
@@ -141,11 +140,6 @@ class Evaluator:
         """
         pbar = tqdm(total=len(self.dataloader))
 
-        if self.seed is not None:
-            generator = torch.manual_seed(self.seed)
-        else:
-            generator = None
-
         for idx, data in enumerate(self.dataloader):
             # handle save_name
             save_name = data.pop("save_name", None)
@@ -154,7 +148,6 @@ class Evaluator:
             video = pipeline(
                 **data,
                 **self.pipeline_kwargs,
-                generator=generator,
             ).videos[0]  # [F, 3, H, W]
 
             # build a vis dict
@@ -221,9 +214,9 @@ class Evaluator:
             w, h = res_image_pil.size
             canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
 
-            ref_image_pil = data["ref_image"][0].resize((w, h))
-            local_patch = data["pose_images"][i].resize((w, h))
-            origin_image_pil = data["src_image"][i].resize((w, h))
+            ref_image_pil = data["reference_image"][0].resize((w, h))
+            local_patch = data["condition"][i].resize((w, h))
+            origin_image_pil = data["driving_video"][i].resize((w, h))
 
             canvas.paste(ref_image_pil, (0, 0))
             canvas.paste(origin_image_pil, (w, 0))
