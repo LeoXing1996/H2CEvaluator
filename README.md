@@ -49,7 +49,6 @@ pipeline_kwargs = {
     "num_inference_steps": 50,
     "height": args.H,
     "width": args.W,
-    "seed": 42,
 }
 evaluator = Evaluator(
     dataset,
