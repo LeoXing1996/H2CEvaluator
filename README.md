@@ -8,6 +8,8 @@ Supported metrics:
 * [SSIM](https://github.com/VainF/pytorch-msssim)
 * [LPIPS](https://github.com/richzhang/PerceptualSimilarity)
 * [Aesthetic Score](https://github.com/christophschuhmann/improved-aesthetic-predictor)
+* [FID](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/metrics/frechet_inception_distance.py)
+* [FVD](https://github.com/wilson1yan/VideoGPT/blob/master/scripts/compute_fvd.py)
 
 ## Under developing
 
@@ -22,7 +24,10 @@ Clone the repo and submodules with the following command.
 ```bash
 git clone git@github.com:LeoXing1996/H2CEvaluator.git
 
-# install pre-commit hook!
+# install
+pip install -e .
+
+# install pre-commit hook if you want to contribute!
 pip install pre-commit
 pre-commit install
 ```
@@ -174,4 +179,15 @@ And the config should be like this:
 metrics:
   - type: 'Aesthetic'
     model_path: './models/sac+logos+ava1-l14-linearMSE.pth'
+```
+
+#### 2.7 [FID](./H2CEvaluator/fid.py) and [FVD](./H2CEvaluator/fvd.py)
+
+```yaml
+  - type: "FID"
+    model_path: models/inception-2015-12-05.pt
+    cache_path: ~/.cache/H2CEvaluator/fid_real_cache_17edbf9bf460120eb820adc439279af7.pt
+  - type: "FVD"
+    model_path: models/i3d_torchscript.pt
+    cache_path: ~/.cache/H2CEvaluator/fvd_real_cache_17edbf9bf460120eb820adc439279af7.pt
 ```

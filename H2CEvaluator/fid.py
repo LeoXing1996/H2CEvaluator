@@ -1,105 +1,171 @@
-import hashlib
 import os.path as osp
+from typing import List, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset
+from accelerate import PartialState
 from scipy import linalg
+
 from .dist_utils import gather_all_tensors
+from .metric_utils import get_dataset_meta, DEFAULT_CACHE_DIR
 
 
 class FID:
-    def __init__(self, model_path="./work_dirs/eval/i3d_torchscript.pt"):
+    def __init__(
+        self,
+        model_path: str = "./models/inception-2015-12-05.pt",
+    ):
         self.inception = torch.load(model_path).cuda()
 
-        self.inception_kwargs = {
-            "rescale": True,
-            "resize": True,
-            "return_features": True,
-        }
+        self.inception_kwargs = {"return_features": True}
 
         self._is_prepared = False
 
         self.real_feat_list = []
         self.fake_feat_list = []
 
-    def prepare(self, dataset, feat_cache_path):
+        self.real_mean = self.real_cov = None
+
+    def prepare(
+        self,
+        dataset: Optional[Dataset] = None,
+        feat_cache_dir: Optional[str] = None,
+        feat_cache_path: Optional[str] = None,
+    ) -> "FID":
         """Prepare metric"""
-        # solve cache path
-        self.real_feat_path = self.get_real_feat_cache_path(dataset, feat_cache_path)
+        assert not (
+            feat_cache_path is not None and feat_cache_dir is not None
+        ), '"feat_cache_path" and "feat_cache_dir" cannot be set at the same time.'
+
+        if feat_cache_path is None:
+            # solve cache path
+            assert dataset is not None, "Please provide dataset to solve cache path."
+            feat_cache_dir = feat_cache_dir or DEFAULT_CACHE_DIR
+            feat_cache_path = self.get_real_feat_cache_path(dataset, feat_cache_dir)
+        feat_cache_path = osp.abspath(osp.expanduser(feat_cache_path))
 
         # attempt to load cache feature
-        if osp.exists(self.real_feat_path):
-            real_feat = torch.load(self.real_feat_path)
+        if osp.exists(feat_cache_path):
+            real_feat = torch.load(feat_cache_path)
             real_mean, real_cov = real_feat["mean"], real_feat["cov"]
         else:
-            real_mean = real_cov = None
+            raise FileExistsError(
+                f'Real feature cache for {self.__class__.__name__} not found ("{feat_cache_path}"). '
+                f"Please run scripts/preprocess.py to generate the cache."
+            )
         self.real_mean, self.real_cov = real_mean, real_cov
 
         self._is_prepared = True
 
-    @staticmethod
-    def get_real_feat_cache_path(dataset, feat_cache_path):
-        dataset_identity = [
-            "sample_rate",
-            "n_sample_frame",
-            "width",
-            "height",
-            "img_size",
-            "cond_size",
-            "img_scale",
-            "img_ratio",
-            "rtmpose_drop_rate",
-            "patch_drop_rate",
-            "patch_aug_prob",
-            "data_meta_paths",
-        ]
-        dataset_kwargs = {k: dataset.__dict__.get(k, None) for k in dataset_identity}
-        md5 = hashlib.md5(str(dataset_kwargs).encode()).hexdigest()
-        real_feat_path = osp.join(feat_cache_path, f"fvd_real_cache_{md5}.pt")
+        return self
+
+    def get_real_feat_cache_path(self, dataset, feat_cache_path):
+        _, md5 = get_dataset_meta(dataset)
+        real_feat_path = osp.join(
+            feat_cache_path,
+            f"{self.__class__.__name__}_real_cache_{md5}.pt",
+        )
 
         return real_feat_path
 
+    def dump_real_feature_cache(
+        self,
+        cache_path: str,
+        dataset_meta: Optional[dict] = None,
+    ):
+        real_feat_mean, real_feat_cov = self._get_mean_cov(self.real_feat_list)
+
+        torch.save(
+            {
+                "mean": real_feat_mean,
+                "cov": real_feat_cov,
+                "dataset_meta": dataset_meta,
+            },
+            cache_path,
+        )
+
+    @staticmethod
+    def _get_mean_cov(feat_list: List[torch.Tensor]):
+        if len(feat_list) > 1:
+            feat = torch.cat(feat_list)
+        else:
+            feat = feat_list[0]
+
+        if PartialState().use_distributed:
+            feat = gather_all_tensors(feat)
+            feat = torch.cat(feat)
+
+        feat_np = feat.cpu().numpy()
+        feat_mean = np.mean(feat_np, 0)
+        feat_cov_np = np.cov(feat_np, rowvar=False)
+
+        return feat_mean, feat_cov_np
+
     def run_evaluation(self):
         # all gather
-        fake_feat = gather_all_tensors(self.fake_feat_list)
-
-        fake_feat_mean = np.mean(fake_feat, 0)
-        fake_feat_cov = np.cov(fake_feat, rowvar=False)
-
-        if self.real_mean is None:
-            real_feat = gather_all_tensors(self.real_feat_list)
-            real_feat_mean = np.mean(real_feat, 0)
-            real_feat_cov = np.cov(real_feat, rowvar=False)
-            self.real_mean, self.real_cov = real_feat_mean, real_feat_cov
-            torch.save(
-                {"mean": self.real_mean, "cov": self.real_cov},
-                self.real_feat_path,
-            )
+        fake_mean, fake_cov = self._get_mean_cov(self.fake_feat_list)
 
         self.fake_feat_list.clear()
         self.real_feat_list.clear()
 
-        fid, mean, trace = self._calc_fid(
-            fake_feat_mean,
-            fake_feat_cov,
+        score, mean, trace = self._calc_fid(
+            fake_mean,
+            fake_cov,
             self.real_mean,
             self.real_cov,
         )
 
-        return {"fvd": fid, "mean": mean, "trace": trace}
+        metric_name = self.__class__.__name__
+        return {
+            metric_name: score,
+            f"{metric_name}_mean": mean,
+            f"{metric_name}_trace": trace,
+        }
 
     @torch.no_grad()
     def feed_one_sample(self, sample: torch.Tensor, mode: str):
         """
         Feed one sample, forward inception network, and save to the feature list.
+
+        Args:
+            sample (torch.Tensor | dict): If sample is tensor, sample should be
+                [F, C, H, W], order in RGB, range in (0, 1). Otherwise, is dict
+                with list of np.ndarray. The length of list is F and all elements
+                are un-processed, in [0, 255], [B, H, W, C].
         """
-        # TODO: we need some pre-process function, check this later.
+        # NOTE: input sample should be (b, c, h, w), in [0, 255] and **BGR**
+
         if mode == "fake":
-            fake_feat = self.inception(sample)
-            self.fake_feat.append(fake_feat)
-        elif mode == "real" and self.real_mean is None:
-            real_feat = self.inception(sample)
-            self.real_feat.append(real_feat)
+            assert (
+                self._is_prepared
+            ), "FID is not prepared. Please check your evaluator."
+            fake_sample = sample.cuda() / 255  # [f, c, h, w]
+            fake_sample = fake_sample[:, [2, 1, 0], ...]  # [RGB] -> [BGR]
+            fake_feat = self.inception(
+                fake_sample,
+                **self.inception_kwargs,
+            )
+            self.fake_feat_list.append(fake_feat)
+
+            return {}
+
+        elif mode == "real":
+            driving_sample = np.stack(sample["driving_video"])  # [f, h, w, c]
+            driving_sample = (
+                torch.from_numpy(driving_sample)
+                .to(dtype=torch.float32, device="cuda")
+                .permute(0, 3, 1, 2)
+            )  # [f, c, h, w]
+            driving_sample = driving_sample[:, [2, 1, 0], ...]  # [RGB] -> [BGR]
+            real_feat = self.inception(
+                driving_sample,
+                **self.inception_kwargs,
+            )
+            self.real_feat_list.append(real_feat)
+
+            return {}
+
         else:
             raise ValueError(f"Do not support mode {mode}.")
 
