@@ -1,4 +1,10 @@
 import hashlib
+import os
+import os.path as osp
+
+DEFAULT_CACHE_DIR = osp.abspath(osp.expanduser("~/.cache/H2CEvaluator"))
+
+os.makedirs(DEFAULT_CACHE_DIR, exist_ok=True)
 
 
 def get_dataset_meta(dataset):

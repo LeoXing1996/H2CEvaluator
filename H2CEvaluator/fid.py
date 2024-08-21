@@ -3,15 +3,19 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset
 from accelerate import PartialState
 from scipy import linalg
 
 from .dist_utils import gather_all_tensors
-from .metric_utils import get_dataset_meta
+from .metric_utils import get_dataset_meta, DEFAULT_CACHE_DIR
 
 
 class FID:
-    def __init__(self, model_path="./models/inception-2015-12-05.pt"):
+    def __init__(
+        self,
+        model_path: str = "./models/inception-2015-12-05.pt",
+    ):
         self.inception = torch.load(model_path).cuda()
 
         self.inception_kwargs = {"return_features": True}
@@ -23,28 +27,45 @@ class FID:
 
         self.real_mean = self.real_cov = None
 
-    def prepare(self, dataset, feat_cache_path):
+    def prepare(
+        self,
+        dataset: Optional[Dataset] = None,
+        feat_cache_dir: Optional[str] = None,
+        feat_cache_path: Optional[str] = None,
+    ) -> "FID":
         """Prepare metric"""
-        # solve cache path
-        self.real_feat_path = self.get_real_feat_cache_path(dataset, feat_cache_path)
+        assert not (
+            feat_cache_path is not None and feat_cache_dir is not None
+        ), '"feat_cache_path" and "feat_cache_dir" cannot be set at the same time.'
+
+        if feat_cache_path is None:
+            # solve cache path
+            assert dataset is not None, "Please provide dataset to solve cache path."
+            feat_cache_dir = feat_cache_dir or DEFAULT_CACHE_DIR
+            feat_cache_path = self.get_real_feat_cache_path(dataset, feat_cache_dir)
+        feat_cache_path = osp.abspath(osp.expanduser(feat_cache_path))
 
         # attempt to load cache feature
-        if osp.exists(self.real_feat_path):
-            real_feat = torch.load(self.real_feat_path)
+        if osp.exists(feat_cache_path):
+            real_feat = torch.load(feat_cache_path)
             real_mean, real_cov = real_feat["mean"], real_feat["cov"]
         else:
             raise FileExistsError(
-                f'Real feature cache for FID not found ("{feat_cache_path}"). '
+                f'Real feature cache for {self.__class__.__name__} not found ("{feat_cache_path}"). '
                 f"Please run scripts/preprocess.py to generate the cache."
             )
         self.real_mean, self.real_cov = real_mean, real_cov
 
         self._is_prepared = True
 
-    @staticmethod
-    def get_real_feat_cache_path(dataset, feat_cache_path):
+        return self
+
+    def get_real_feat_cache_path(self, dataset, feat_cache_path):
         _, md5 = get_dataset_meta(dataset)
-        real_feat_path = osp.join(feat_cache_path, f"fid_real_cache_{md5}.pt")
+        real_feat_path = osp.join(
+            feat_cache_path,
+            f"{self.__class__.__name__}_real_cache_{md5}.pt",
+        )
 
         return real_feat_path
 
@@ -88,14 +109,19 @@ class FID:
         self.fake_feat_list.clear()
         self.real_feat_list.clear()
 
-        fid, mean, trace = self._calc_fid(
+        score, mean, trace = self._calc_fid(
             fake_mean,
             fake_cov,
             self.real_mean,
             self.real_cov,
         )
 
-        return {"fid": fid, "mean": mean, "trace": trace}
+        metric_name = self.__class__.__name__
+        return {
+            metric_name: score,
+            f"{metric_name}_mean": mean,
+            f"{metric_name}_trace": trace,
+        }
 
     @torch.no_grad()
     def feed_one_sample(self, sample: torch.Tensor, mode: str):
@@ -114,10 +140,16 @@ class FID:
             assert (
                 self._is_prepared
             ), "FID is not prepared. Please check your evaluator."
-            fake_sample = sample / 255  # [f, c, h, w]
+            fake_sample = sample.cuda() / 255  # [f, c, h, w]
             fake_sample = fake_sample[:, [2, 1, 0], ...]  # [RGB] -> [BGR]
-            fake_feat = self.inception(fake_sample)
-            self.fake_feat.append(fake_feat)
+            fake_feat = self.inception(
+                fake_sample,
+                **self.inception_kwargs,
+            )
+            self.fake_feat_list.append(fake_feat)
+
+            return {}
+
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"])  # [f, h, w, c]
             driving_sample = (
@@ -126,8 +158,14 @@ class FID:
                 .permute(0, 3, 1, 2)
             )  # [f, c, h, w]
             driving_sample = driving_sample[:, [2, 1, 0], ...]  # [RGB] -> [BGR]
-            real_feat = self.inception(driving_sample, **self.inception_kwargs)
+            real_feat = self.inception(
+                driving_sample,
+                **self.inception_kwargs,
+            )
             self.real_feat_list.append(real_feat)
+
+            return {}
+
         else:
             raise ValueError(f"Do not support mode {mode}.")
 

@@ -58,7 +58,7 @@ class Evaluator:
         save_as_frames: bool = False,
         save_path: Optional[str] = None,
     ):
-        self.metric_list = self.build_metrics(metric_list)
+        self.metric_list = self.build_metrics(metric_list, dataset)
 
         self.dataloader = self.build_dataloader(dataset)
 
@@ -69,7 +69,11 @@ class Evaluator:
 
         self.pipeline_kwargs = deepcopy(pipeline_kwargs)
 
-    def build_metrics(self, metric_list: METRIC_CONFIG_TYPE = None):
+    def build_metrics(
+        self,
+        metric_list: METRIC_CONFIG_TYPE = None,
+        dataset: Optional[Dataset] = None,
+    ):
         if not metric_list:
             return []
         # NOTE: we do not have much metrics,
@@ -131,12 +135,32 @@ class Evaluator:
             elif metric_type.upper() == "FID":
                 from .fid import FID
 
-                metrics.append(FID(**metric_kwargs))
+                cache_dir = metric_kwargs.pop("cache_dir", None)
+                cache_path = metric_kwargs.pop("cache_path", None)
+                metrics.append(
+                    FID(**metric_kwargs).prepare(
+                        dataset,
+                        cache_dir,
+                        cache_path,
+                    )
+                )
+
+                has_self_metric = True
 
             elif metric_type.upper() == "FVD":
                 from .fvd import FVD
 
-                metrics.append(FVD(**metric_kwargs))
+                cache_dir = metric_kwargs.pop("cache_dir", None)
+                cache_path = metric_kwargs.pop("cache_path", None)
+                metrics.append(
+                    FVD(**metric_kwargs).prepare(
+                        dataset,
+                        cache_dir,
+                        cache_path,
+                    )
+                )
+
+                has_self_metric = True
 
             else:
                 raise ValueError("Do not support metric {}".format(metric))
