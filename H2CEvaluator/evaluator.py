@@ -7,6 +7,7 @@ import torch
 from accelerate import PartialState
 from accelerate.utils.tqdm import tqdm
 from omegaconf import OmegaConf
+import imageio
 from PIL import Image
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
@@ -207,17 +208,17 @@ class Evaluator:
     def save_video_frames(
         self,
         video: torch.Tensor,
-        data: Dict,
-        extra_vis_dict: Dict[str, List[Image.Image]],
+        data: Dict[str, List[np.ndarray]],
+        extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name_list: List[str],
     ):
         """
-        Save one video frame
+        Save one video as frames.
 
         Default
-        +-------+--------+---------+-----+-------+
-        | Ref   | Origin | Driving | Gen | Extra |
-        +-------+--------+---------+-----+-------+
+        +-------+---------+-----+-------+
+        | Ref   | Driving | Gen | Extra |
+        +-------+---------+-----+-------+
         """
         video = video.permute(0, 2, 3, 1)
         extra_keys = list(extra_vis_dict.keys())
@@ -227,35 +228,79 @@ class Evaluator:
             res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
             # Save ref_image, src_fimage and the generated_image
             w, h = res_image_pil.size
-            canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
+            canvas = Image.new("RGB", (w * (3 + n_extra_items), h), "white")
 
-            ref_image_pil = data["reference_image"][0].resize((w, h))
-            local_patch = data["condition"][i].resize((w, h))
-            origin_image_pil = data["driving_video"][i].resize((w, h))
+            ref_image_pil = (
+                Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
+            )
+            origin_image_pil = (
+                Image.fromarray(data["driving_video"][i]).convert("RGB").resize((w, h))
+            )
 
             canvas.paste(ref_image_pil, (0, 0))
             canvas.paste(origin_image_pil, (w, 0))
-            canvas.paste(local_patch, (w * 2, 0))
-            canvas.paste(res_image_pil, (w * 3, 0))
+            canvas.paste(res_image_pil, (w * 2, 0))
 
             for k in extra_keys:
                 canvas.paste(
                     extra_vis_dict[k][i].resize((w, h)),
-                    (w * (4 + extra_keys.index(k)), 0),
+                    (w * (3 + extra_keys.index(k)), 0),
                 )
-
-            os.makedirs(self.save_path, exist_ok=True)
 
             sample_name = save_name_list[i]
             img = canvas
             out_file = os.path.join(self.save_path, sample_name)
+            os.makedirs(os.path.dirname(out_file), exist_ok=True)
+
             img.save(out_file)
 
     def save_video(
         self,
         video: torch.Tensor,
-        data: Dict,
-        extra_vis_dict: Dict[str, List[Image.Image]],
+        data: Dict[str, List[np.ndarray]],
+        extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name: str,
     ):
-        pass
+        """
+        Save one video.
+
+        Default
+        +-------+---------+-----+-------+
+        | Ref   | Driving | Gen | Extra |
+        +-------+---------+-----+-------+
+        """
+        video = video.permute(0, 2, 3, 1)
+        extra_keys = list(extra_vis_dict.keys())
+        n_extra_items = len(extra_keys)
+
+        out_file = os.path.join(self.save_path, save_name)
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        writer = imageio.get_writer(out_file, fps=24)
+
+        for i, image in enumerate(video):
+            res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
+            # Save ref_image, src_fimage and the generated_image
+            w, h = res_image_pil.size
+            canvas = Image.new("RGB", (w * (3 + n_extra_items), h), "white")
+
+            ref_image_pil = (
+                Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
+            )
+            origin_image_pil = (
+                Image.fromarray(data["driving_video"][i]).convert("RGB").resize((w, h))
+            )
+
+            canvas.paste(ref_image_pil, (0, 0))
+            canvas.paste(origin_image_pil, (w, 0))
+            canvas.paste(res_image_pil, (w * 2, 0))
+
+            for k in extra_keys:
+                canvas.paste(
+                    extra_vis_dict[k][i].resize((w, h)),
+                    (w * (3 + extra_keys.index(k)), 0),
+                )
+
+            img = canvas
+            writer.append_data(np.array(img))
+
+        writer.close()
