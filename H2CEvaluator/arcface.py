@@ -52,11 +52,14 @@ class ArcFace:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: Union[torch.Tensor, dict], mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
         """Feed one sample.
 
         Args:
-            sample (torch.Tensor): [F, C, H, W], order in RGB, range in (0, 1).
+            sample (torch.Tensor | dict): If sample is tensor, sample should be
+                [F, C, H, W], order in RGB, range in (0, 1). Otherwise, is dict
+                with list of np.ndarray. The length of list is F and all elements
+                are un-processed, in [0, 255], [B, H, W, C].
         """
 
         if mode == "fake":
@@ -67,15 +70,12 @@ class ArcFace:
             self.fake_feat.append(F.normalize(fake_feat))
 
         elif mode == "real":
-            import numpy as np
-
-            ref_samples = (
-                sample["ref_image"] * self.fake_feat[-1].shape[0]
-            )  # list of pillow image
-            ref_samples = [s.resize((112, 112)) for s in ref_samples]
-            ref_samples = [torch.from_numpy(np.array(s)) for s in ref_samples]
-            ref_samples = torch.stack(ref_samples).permute(0, 3, 1, 2).float()
-            ref_samples = (ref_samples / 255 - 0.5) / 0.5  #  [-1, 1]
+            ref_samples = torch.from_numpy(sample["reference_image"])  # [H, W, 3]
+            ref_samples = ref_samples[None].permute(0, 3, 1, 2)  # [1, 3, H, W]
+            ref_samples = ref_samples / 127.5 - 1  # [-1, 1]
+            ref_samples = F.interpolate(ref_samples, size=(112, 112)).repeat(
+                self.fake_feat[-1].shape[0], 1, 1, 1
+            )
 
             real_feat = self.face_model(ref_samples.cuda().half())
             self.real_feat.append(real_feat / torch.norm(real_feat, dim=1)[:, None])

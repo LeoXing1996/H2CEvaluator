@@ -75,6 +75,7 @@ class Evaluator:
         # NOTE: we do not have much metrics,
         # therefore, let's hardcode here (@_@).
 
+        has_self_metric = has_cross_metric = False
         metrics = []
         for metric in metric_list:
             try:
@@ -113,10 +114,14 @@ class Evaluator:
 
                 metrics.append(LPIPS(**metric_kwargs))
 
+                has_self_metric = True
+
             elif metric_type.upper() == "SSIM":
                 from .ssim import SSIM
 
                 metrics.append(SSIM(**metric_kwargs))
+
+                has_self_metric = True
 
             elif metric_type.upper() == "AESTHETIC":
                 from .aesthetic import Aesthetic
@@ -125,6 +130,12 @@ class Evaluator:
 
             else:
                 raise ValueError("Do not support metric {}".format(metric))
+
+        if has_self_metric and has_cross_metric:
+            print(
+                "WARNING: You are using both Self-Reconstruction-Metric and "
+                "Cross-ID-Generation-Metric. Please make sure you know what you are doing!"
+            )
 
         return metrics
 
