@@ -180,3 +180,14 @@ metrics:
   - type: 'Aesthetic'
     model_path: './models/sac+logos+ava1-l14-linearMSE.pth'
 ```
+
+#### 2.7 [FID](./H2CEvaluator/fid.py) and [FVD](./H2CEvaluator/fvd.py)
+
+```yaml
+  - type: "FID"
+    model_path: models/inception-2015-12-05.pt
+    cache_path: ~/.cache/H2CEvaluator/fid_real_cache_17edbf9bf460120eb820adc439279af7.pt
+  - type: "FVD"
+    model_path: models/i3d_torchscript.pt
+    cache_path: ~/.cache/H2CEvaluator/fvd_real_cache_17edbf9bf460120eb820adc439279af7.pt
+```
