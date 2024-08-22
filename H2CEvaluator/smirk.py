@@ -222,22 +222,22 @@ class SMIRK:
             A dict contains rerendered face and face parameters.
         """
         if isinstance(frame, torch.Tensor):
-            frame_np = (frame.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
+            frame = (frame.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
         else:
             assert isinstance(frame, np.ndarray), TypeError(
                 f"Only support torch.Tensor or np.ndarray, but receive {type(frame)}."
             )
 
-        orig_height, orig_width = frame_np.shape[0], frame_np.shape[1]
-        landmarks = self._extract_landmarks(frame_np)
+        orig_height, orig_width = frame.shape[0], frame.shape[1]
+        landmarks = self._extract_landmarks(frame)
 
         if self.crop_face:
             landmarks = landmarks[..., :2]
 
-            tform = crop_face(frame_np, landmarks, scale=1.4, image_size=224)
+            tform = crop_face(frame, landmarks, scale=1.4, image_size=224)
 
             cropped_frame = warp(
-                frame_np,
+                frame,
                 tform.inverse,
                 output_shape=(224, 224),
                 preserve_range=True,
@@ -249,7 +249,7 @@ class SMIRK:
             ).T
             cropped_landmarks = cropped_landmarks[:, :2]
         else:
-            cropped_frame = frame_np
+            cropped_frame = frame
             cropped_landmarks = landmarks
 
         cropped_frame = cv2.resize(cropped_frame, (224, 224))
