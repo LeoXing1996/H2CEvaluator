@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 
 import torch
 import torch.nn.functional as F
+from accelerate import PartialState
 
 
 def _simple_gather_all_tensors(
@@ -72,3 +73,16 @@ def gather_all_tensors(
         slice_param = [slice(dim_size) for dim_size in item_size]
         gathered_result[idx] = gathered_result[idx][slice_param]
     return gathered_result
+
+
+def gather_tensor_list(tensor_list):
+    if len(tensor_list) > 1:
+        res = torch.cat(tensor_list)
+    else:
+        res = tensor_list[0]
+
+    if PartialState().use_distributed:
+        res = gather_all_tensors(res)
+        res = torch.cat(res)
+
+    return res

@@ -1,10 +1,11 @@
 from typing import Tuple, Union
 
+import os.path as osp
 import numpy as np
 import torch
-from accelerate import PartialState
 
-from .dist_utils import gather_all_tensors
+from .dist_utils import gather_tensor_list
+from .metric_utils import FileHashItem, MetricModelItems, DEFAULT_CACHE_DIR
 from .point_tracking_utils import (
     Visualizer,
     get_local_patch_tracks,
@@ -12,36 +13,64 @@ from .point_tracking_utils import (
     process_one_image,
 )
 
-DETECTOR_CONFIG = "config/yolox-s_8xb8-300e_coco-face.py"
-POSE_CONFIG = "config/rtmpose-m_8xb256-120e_face6-256x256.py"
-DETECTOR_CHECKPOINT = "yolo-x_8xb8-300e_coco-face_13274d7c.pth"
-POSE_CHECKPOINT = "rtmpose-m_simcc-face6_pt-in1k_120e-256x256-72a37400_20230529.pth"
+DETECTOR_CONFIG = osp.abspath(
+    osp.join(__file__, "..", "configs/yolox-s_8xb8-300e_coco-face.py")
+)
+POSE_CONFIG = osp.abspath(
+    osp.join(__file__, "..", "configs/rtmpose-m_8xb256-120e_face6-256x256.py")
+)
 
 
 SAMPLE_TYPE = Union[torch.Tensor, dict]
 
 
 class PointTracking:
+    """
+    Metric for face region point tracking.
+    """
+
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "yolo-x_8xb8-300e_coco-face_13274d7c.pth",
+                sha256="13274d7c0cf00381b8cd1186f0aea849582f83c53f8a9c5cdf0227fc0042d283",
+            ),
+            FileHashItem(
+                "rtmpose-m_simcc-face6_pt-in1k_120e-256x256-72a37400_20230529.pth",
+                sha256="72a37400a40946db314ec8287e2e77cddc0b1f4a9e1bced3af633355cb72bd03",
+            ),
+        ],
+        remote_subfolder="rtmpose",
+    )
+
     def __init__(
         self,
+        model_dir: str = osp.join(DEFAULT_CACHE_DIR, "rtmpose"),
         eye_grid_size: int = 20,
         mouse_grid_size: int = 10,
         enable_vis: bool = True,
     ):
+        self.metric_items.prepare_model(model_dir)
+
         self.eye_grid_size = eye_grid_size
         self.mouse_grid_size = mouse_grid_size
         self.enable_vis = enable_vis
+        if self.enable_vis:
+            self.visualier = Visualizer(linewidth=1, show_first_frame=0)
 
         self.tracker = torch.hub.load(
             "facebookresearch/co-tracker",
             "cotracker2_online",
         ).cuda()
 
+        detector_checkpoint = f"{model_dir}/yolo-x_8xb8-300e_coco-face_13274d7c.pth"
+        pose_checkpoint = f"{model_dir}/rtmpose-m_simcc-face6_pt-in1k_120e-256x256-72a37400_20230529.pth"
+
         self.detector, self.pose_estimator = init_model(
             DETECTOR_CONFIG,
             POSE_CONFIG,
-            DETECTOR_CHECKPOINT,
-            POSE_CHECKPOINT,
+            detector_checkpoint,
+            pose_checkpoint,
         )
 
         self.fake_track_list = []
@@ -52,14 +81,7 @@ class PointTracking:
         return
 
     def run_evaluation(self):
-        if len(self.distance_list) > 1:
-            tracking_dist = torch.cat(self.distance_list)
-        else:
-            tracking_dist = self.distance_list[0]
-        if PartialState().use_distributed:
-            tracking_dist = gather_all_tensors(tracking_dist)
-            tracking_dist = torch.cat(tracking_dist)
-
+        tracking_dist = gather_tensor_list(self.distance_list)
         tracking_dist = torch.mean(tracking_dist).item()
         self.distance_list.clear()
         result_dict = {"point_tracking": tracking_dist}
@@ -103,16 +125,9 @@ class PointTracking:
             video_frames: Video frames, [F, C, H, W], RGB, range in [0, 1].
         """
         is_first_step = True
-        # video_frame_list = []
 
-        # TODO: convert to indicing
-        # for idx, frame in enumerate(video_frames):
         for idx in range(video_frames.shape[0]):
             if idx != 0 and idx % self.tracker.step == 0:
-                # video_chunk = torch.stack(video_frame_list[-self.tracker.step * 2 :])[
-                #     None
-                # ].float()  # [1, F', C, H, W]
-
                 video_chunk = video_frames[idx - self.tracker.step * 2 : idx][None]
 
                 pred_tracks, pred_visibility = self.tracker(
@@ -122,12 +137,8 @@ class PointTracking:
                 )
 
                 is_first_step = False
-            # video_frame_list.append(frame)
 
         # final frame
-        # video_chunk = torch.stack(
-        #     video_frame_list[-(idx % self.tracker.step) - self.tracker.step - 1 :]
-        # )[None]
         video_chunk = video_frames[
             -(idx % self.tracker.step) - self.tracker.step - 1 :
         ][None]
@@ -163,19 +174,19 @@ class PointTracking:
                 fake_tracks_np[0, :, 0].max() - fake_tracks_np[0, :, 0].min()
             )
             bx = np.mean(real_tracks_np[0, :, 0] - ax * fake_tracks_np[0, :, 0])
-            a = np.array([ax, ay])
-            b = np.array([bx, by])
+            a = torch.Tensor([ax, ay]).to(fake_tracks)
+            b = torch.Tensor([bx, by]).to(fake_tracks)
 
             # 3. apply the transformation to fake_tracks
-            fake_tracks = torch.from_numpy(fake_tracks_np * a + b).to(real_tracks)
+            fake_tracks = fake_tracks * a + b
 
-        real_norm_scale = torch.Tensor(
+        real_norm_scale = torch.stack(
             [
                 real_tracks[0, :, 0].max() - real_tracks[0, :, 0].min(),
                 real_tracks[0, :, 1].max() - real_tracks[0, :, 1].min(),
             ]
         )
-        fake_norm_scale = torch.Tensor(
+        fake_norm_scale = torch.stack(
             [
                 fake_tracks[0, :, 0].max() - fake_tracks[0, :, 0].min(),
                 fake_tracks[0, :, 1].max() - fake_tracks[0, :, 1].min(),
@@ -207,14 +218,13 @@ class PointTracking:
             query = self._get_query(first_frame)
 
             pred_tracking, pred_visibility = self._preprocess_one_clip(
-                fake_sample,
+                fake_sample.cuda(),
                 query,
             )
             self.fake_track_list.append(pred_tracking)
 
             if self.enable_vis:
-                visualier = Visualizer(linewidth=1)
-                fake_tracking_vis = visualier.visualize(
+                fake_tracking_vis = self.visualier.visualize(
                     fake_sample[None],  # [1, F, C, H, W]
                     tracks=pred_tracking,  # [1, F, N, 2]
                     visibility=pred_visibility,  # [1, F, N]
@@ -254,14 +264,12 @@ class PointTracking:
             tracking_distance = self._calc_score(
                 real_pred_tracking,
                 fake_pred_tracking,
-                enable_retargeting=False,
+                enable_retargeting=True,
             )
-            self.distance_list.append(tracking_distance)
+            self.distance_list.append(tracking_distance[None])
 
             if self.enable_vis:
-                visualier = Visualizer(linewidth=1)
-
-                real_tracking_vis = visualier.visualize(
+                real_tracking_vis = self.visualier.visualize(
                     driving_sample[None],  # [1, F, C, H, W]
                     tracks=pred_tracking,  # [1, F, N, 2]
                     visibility=pred_visibility,  # [1, F, N]

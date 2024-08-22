@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from accelerate import PartialState
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from PIL import Image
 from skimage.transform import estimate_transform, warp
 
 from .dist_utils import gather_all_tensors
@@ -370,13 +369,11 @@ class SMIRK:
             # return item (maybe items) for visualization
             if self.enable_vis:
                 tensor_to_vis = fake_dict[vis_key]
-                pil_to_vis = [
-                    Image.fromarray(
-                        (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-                    )
+                vis_list = [
+                    (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for ten in tensor_to_vis
                 ]
-                return {f"{vis_key}_fake": pil_to_vis}
+                return {f"{vis_key}_fake": vis_list}
             else:
                 return {}
 
@@ -400,13 +397,11 @@ class SMIRK:
             # return item (maybe items) for visualization
             if self.enable_vis:
                 tensor_to_vis = real_dict[vis_key]
-                pil_to_vis = [
-                    Image.fromarray(
-                        (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-                    )
+                vis_list = [
+                    (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for ten in tensor_to_vis
                 ]
-                return {f"{vis_key}_real": pil_to_vis}
+                return {f"{vis_key}_real": vis_list}
             else:
                 return {}
         else:

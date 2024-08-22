@@ -166,6 +166,11 @@ class Evaluator:
 
                 has_self_metric = True
 
+            elif metric_type.upper() == "POINTTRACKING":
+                from .point_tracking import PointTracking
+
+                metrics.append(PointTracking(**metric_kwargs))
+
             else:
                 raise ValueError("Do not support metric {}".format(metric))
 
@@ -292,7 +297,7 @@ class Evaluator:
 
             for k in extra_keys:
                 canvas.paste(
-                    extra_vis_dict[k][i].resize((w, h)),
+                    Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
                     (w * (3 + extra_keys.index(k)), 0),
                 )
 
@@ -345,7 +350,7 @@ class Evaluator:
 
             for k in extra_keys:
                 canvas.paste(
-                    extra_vis_dict[k][i].resize((w, h)),
+                    Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
                     (w * (3 + extra_keys.index(k)), 0),
                 )
 
