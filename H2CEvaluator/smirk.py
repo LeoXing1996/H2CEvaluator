@@ -6,11 +6,13 @@ import mediapipe as mp
 import numpy as np
 import torch
 import torch.nn.functional as F
+from accelerate import PartialState
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from PIL import Image
 from skimage.transform import estimate_transform, warp
 
+from .dist_utils import gather_all_tensors
 from .metric_utils import DEFAULT_CACHE_DIR, FileHashItem, MetricModelItems
 from .SMIRK.FLAME.FLAME import FLAME
 from .SMIRK.renderer.renderer import Renderer
@@ -222,22 +224,22 @@ class SMIRK:
             A dict contains rerendered face and face parameters.
         """
         if isinstance(frame, torch.Tensor):
-            frame_np = (frame.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
+            frame = (frame.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
         else:
             assert isinstance(frame, np.ndarray), TypeError(
                 f"Only support torch.Tensor or np.ndarray, but receive {type(frame)}."
             )
 
-        orig_height, orig_width = frame_np.shape[0], frame_np.shape[1]
-        landmarks = self._extract_landmarks(frame_np)
+        orig_height, orig_width = frame.shape[0], frame.shape[1]
+        landmarks = self._extract_landmarks(frame)
 
         if self.crop_face:
             landmarks = landmarks[..., :2]
 
-            tform = crop_face(frame_np, landmarks, scale=1.4, image_size=224)
+            tform = crop_face(frame, landmarks, scale=1.4, image_size=224)
 
             cropped_frame = warp(
-                frame_np,
+                frame,
                 tform.inverse,
                 output_shape=(224, 224),
                 preserve_range=True,
@@ -249,7 +251,7 @@ class SMIRK:
             ).T
             cropped_landmarks = cropped_landmarks[:, :2]
         else:
-            cropped_frame = frame_np
+            cropped_frame = frame
             cropped_landmarks = landmarks
 
         cropped_frame = cv2.resize(cropped_frame, (224, 224))
@@ -306,9 +308,34 @@ class SMIRK:
 
         return output_dict
 
+    @staticmethod
+    def gather_tensor_list(tensor_list):
+        if len(tensor_list) > 1:
+            res = torch.cat(tensor_list)
+        else:
+            res = tensor_list[0]
+
+        if PartialState().use_distributed:
+            res = gather_all_tensors(res)
+            res = torch.cat(res)
+
+        return res
+
     def run_evaluation(self):
-        # TODO:
-        return {}
+        result_dict = {}
+        if self.enable_expression:
+            fake_expressions = self.gather_tensor_list(self.fake_expression_list)
+            real_expressions = self.gather_tensor_list(self.real_expression_list)
+            expression_dist = F.l1_loss(fake_expressions, real_expressions)
+            result_dict["expression_dist"] = expression_dist.item()
+
+        if self.enable_head_pose:
+            fake_head_poses = self.gather_tensor_list(self.fake_head_pose_list)
+            real_head_poses = self.gather_tensor_list(self.real_head_pose_list)
+            head_pose_dist = F.l1_loss(fake_head_poses, real_head_poses)
+            result_dict["head_pose_dist"] = head_pose_dist.item()
+
+        return result_dict
 
     @torch.no_grad()
     def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
@@ -321,7 +348,7 @@ class SMIRK:
                 are un-processed, in [0, 255], [B, H, W, C].
         """
 
-        expression_key = "transformed_vertices"  # TODO: maybe use other keys
+        expression_key = "transformed_vertices"
         headpose_key = "pose_params"
         vis_key = "rerender_frame"
 

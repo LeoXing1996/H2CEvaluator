@@ -108,10 +108,14 @@ class Evaluator:
 
                 metrics.append(ArcFace(**metric_kwargs))
 
+                has_cross_metric = True
+
             elif metric_type.upper() == "SMIRK":
                 from .smirk import SMIRK
 
                 metrics.append(SMIRK(**metric_kwargs))
+
+                has_cross_metric = True
 
             elif metric_type.upper() == "LPIPS":
                 from .lpips import LPIPS

@@ -10,10 +10,7 @@ Supported metrics:
 * [Aesthetic Score](https://github.com/christophschuhmann/improved-aesthetic-predictor)
 * [FID](https://github.com/NVlabs/stylegan2-ada-pytorch/blob/main/metrics/frechet_inception_distance.py)
 * [FVD](https://github.com/wilson1yan/VideoGPT/blob/master/scripts/compute_fvd.py)
-
-## Under developing
-
-- [ ] [SMIRK-Face and head pose](https://github.com/georgeretsi/smirk)
+* [SMIRK-Face and head pose](https://github.com/georgeretsi/smirk)
 
 ## Install
 
