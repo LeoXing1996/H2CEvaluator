@@ -1,17 +1,31 @@
+import os.path as osp
 import torch
 import torchvision
-from accelerate import PartialState
 
-from .dist_utils import gather_all_tensors
+from .dist_utils import gather_tensor_list
 from .hyperIQA.models import HyperNet, TargetNet
+
+from .metric_utils import FileHashItem, MetricModelItems, DEFAULT_CACHE_DIR
 
 
 class HyperIQA:
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "koniq_pretrained.pkl",
+                sha256="ff9277bcc68ecc10e77d88b6d0a32825ec3c85562095542734ec6212eaaf6d81",
+            ),
+        ],
+        remote_subfolder="hyperiqa",
+    )
+
     def __init__(
         self,
-        model_path="./models/koniq_pretrained.pkl",
+        model_dir: str = osp.join(DEFAULT_CACHE_DIR, "hyperiqa"),
         n_randn_crop: int = 10,
     ):
+        self.metric_items.prepare_model(model_dir)
+        model_path = f"{model_dir}/koniq_pretrained.pkl"
         model_hyper = HyperNet(16, 112, 224, 112, 56, 28, 14, 7).cuda()
         model_hyper.train(False)
 
@@ -34,20 +48,8 @@ class HyperIQA:
 
         self.iqa_scores = []
 
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
-
     def run_evaluation(self):
-        if len(self.iqa_scores) > 1:
-            iqa_scores = torch.cat(self.iqa_scores)
-        else:
-            iqa_scores = self.iqa_scores[0]
-
-        if PartialState().use_distributed:
-            iqa_scores = gather_all_tensors(iqa_scores)
-            iqa_scores = torch.cat(iqa_scores)
-
+        iqa_scores = gather_tensor_list(self.iqa_scores)
         score = iqa_scores.mean().item()
 
         result_dict = {"iqa_score": score}

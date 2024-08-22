@@ -1,11 +1,18 @@
+import os.path as osp
+
 import clip
 import torch
 import torch.nn as nn
-from accelerate import PartialState
+from torchvision.transforms import (
+    CenterCrop,
+    Compose,
+    InterpolationMode,
+    Normalize,
+    Resize,
+)
 
-from .dist_utils import gather_all_tensors
-from torchvision.transforms import Compose, Resize, CenterCrop, Normalize
-from torchvision.transforms import InterpolationMode
+from .dist_utils import gather_tensor_list
+from .metric_utils import DEFAULT_CACHE_DIR, FileHashItem, MetricModelItems
 
 BICUBIC = InterpolationMode.BICUBIC
 
@@ -49,7 +56,20 @@ class MLP(nn.Module):
 
 
 class Aesthetic:
-    def __init__(self, model_path: str = "./models/sac+logos+ava1-l14-linearMSE.pth"):
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "sac+logos+ava1-l14-linearMSE.pth",
+                sha256="21dd590f3ccdc646f0d53120778b296013b096a035a2718c9cb0d511bff0f1e0",
+            ),
+        ],
+        remote_subfolder="aesthetic",
+    )
+
+    def __init__(self, model_dir: str = osp.join(DEFAULT_CACHE_DIR, "rtmpose")):
+        self.metric_items.prepare_model(model_dir)
+
+        model_path = f"{model_dir}/sac+logos+ava1-l14-linearMSE.pth"
         self.model = MLP(768)
         self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
         self.model.cuda().eval()
@@ -59,19 +79,9 @@ class Aesthetic:
 
         self.score_list = []
 
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
-
     def run_evaluation(self):
-        score_list = torch.cat(self.score_list)
-        if PartialState().use_distributed:
-            score = gather_all_tensors(score_list)
-            score = torch.cat(score)
-        else:
-            score = score_list
-
-        score = torch.mean(score).item()
+        score_list = gather_tensor_list(self.score_list)
+        score = torch.mean(score_list).item()
         self.score_list.clear()
         result_dict = {"aesthetic_score": score}
         return result_dict
@@ -85,7 +95,7 @@ class Aesthetic:
         return a / np.expand_dims(l2, axis)
 
     @torch.no_grad()
-    def feed_one_sample(self, sample, mode: str):
+    def feed_one_sample(self, sample: torch.Tensor, mode: str):
         """Feed one sample.
 
         Args:

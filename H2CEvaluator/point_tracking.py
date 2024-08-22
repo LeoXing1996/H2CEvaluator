@@ -76,10 +76,6 @@ class PointTracking:
         self.fake_track_list = []
         self.distance_list = []
 
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
-
     def run_evaluation(self):
         tracking_dist = gather_tensor_list(self.distance_list)
         tracking_dist = torch.mean(tracking_dist).item()

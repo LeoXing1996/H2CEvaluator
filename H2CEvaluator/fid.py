@@ -3,20 +3,34 @@ from typing import List, Optional
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
-from accelerate import PartialState
 from scipy import linalg
+from torch.utils.data import Dataset
 
-from .dist_utils import gather_all_tensors
-from .metric_utils import get_dataset_meta, DEFAULT_CACHE_DIR
+from .dist_utils import gather_tensor_list
+from .metric_utils import (
+    DEFAULT_CACHE_DIR,
+    SAMPLE_TYPE,
+    FileHashItem,
+    MetricModelItems,
+    get_dataset_meta,
+)
 
 
 class FID:
-    def __init__(
-        self,
-        model_path: str = "./models/inception-2015-12-05.pt",
-    ):
-        self.inception = torch.load(model_path).cuda()
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "inception-2015-12-05.pt",
+                sha256="f58cb9b6ec323ed63459aa4fb441fe750cfe39fafad6da5cb504a16f19e958f4",
+            ),
+        ],
+        remote_subfolder="fid",
+    )
+
+    def __init__(self, model_dir: str = osp.join(DEFAULT_CACHE_DIR, "fid")):
+        self.metric_items.prepare_model(model_dir)
+        model_path = f"{model_dir}/inception-2015-12-05.pt"
+        self.inception = torch.jit.load(model_path).cuda()
 
         self.inception_kwargs = {"return_features": True}
 
@@ -87,15 +101,7 @@ class FID:
 
     @staticmethod
     def _get_mean_cov(feat_list: List[torch.Tensor]):
-        if len(feat_list) > 1:
-            feat = torch.cat(feat_list)
-        else:
-            feat = feat_list[0]
-
-        if PartialState().use_distributed:
-            feat = gather_all_tensors(feat)
-            feat = torch.cat(feat)
-
+        feat = gather_tensor_list(feat_list)
         feat_np = feat.cpu().numpy()
         feat_mean = np.mean(feat_np, 0)
         feat_cov_np = np.cov(feat_np, rowvar=False)
@@ -124,7 +130,7 @@ class FID:
         }
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: torch.Tensor, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
         """
         Feed one sample, forward inception network, and save to the feature list.
 

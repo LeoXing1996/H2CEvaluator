@@ -6,12 +6,11 @@ import mediapipe as mp
 import numpy as np
 import torch
 import torch.nn.functional as F
-from accelerate import PartialState
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from skimage.transform import estimate_transform, warp
 
-from .dist_utils import gather_all_tensors
+from .dist_utils import gather_tensor_list
 from .metric_utils import DEFAULT_CACHE_DIR, FileHashItem, MetricModelItems
 from .SMIRK.FLAME.FLAME import FLAME
 from .SMIRK.renderer.renderer import Renderer
@@ -161,19 +160,15 @@ class SMIRK:
         self.enable_expression = enable_expression
         self.enable_head_pose = enable_head_pose
 
-        self.real_expression_list = []
         self.fake_expression_list = []
-        self.real_head_pose_list = []
+        self.expression_dist_list = []
         self.fake_head_pose_list = []
+        self.head_pose_dist_list = []
 
         self.crop_face = crop_face
         self.render_orig = render_orig
 
         self.enable_vis = enable_vis
-
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        pass
 
     def _extract_landmarks(self, image: np.ndarray) -> np.ndarray:
         """
@@ -307,32 +302,19 @@ class SMIRK:
 
         return output_dict
 
-    @staticmethod
-    def gather_tensor_list(tensor_list):
-        if len(tensor_list) > 1:
-            res = torch.cat(tensor_list)
-        else:
-            res = tensor_list[0]
-
-        if PartialState().use_distributed:
-            res = gather_all_tensors(res)
-            res = torch.cat(res)
-
-        return res
-
     def run_evaluation(self):
         result_dict = {}
         if self.enable_expression:
-            fake_expressions = self.gather_tensor_list(self.fake_expression_list)
-            real_expressions = self.gather_tensor_list(self.real_expression_list)
-            expression_dist = F.l1_loss(fake_expressions, real_expressions)
-            result_dict["expression_dist"] = expression_dist.item()
+            expression_dist_list = gather_tensor_list(self.expression_dist_list)
+            expression_dist = torch.mean(expression_dist_list).item()
+            self.expression_dist_list.clear()
+            result_dict["expression_dist"] = expression_dist
 
         if self.enable_head_pose:
-            fake_head_poses = self.gather_tensor_list(self.fake_head_pose_list)
-            real_head_poses = self.gather_tensor_list(self.real_head_pose_list)
-            head_pose_dist = F.l1_loss(fake_head_poses, real_head_poses)
-            result_dict["head_pose_dist"] = head_pose_dist.item()
+            head_pose_dist_list = gather_tensor_list(self.head_pose_dist_list)
+            head_pose_dist = torch.mean(head_pose_dist_list).item()
+            self.head_pose_dist_list.clear()
+            result_dict["head_pose_dist"] = head_pose_dist
 
         return result_dict
 
@@ -390,9 +372,25 @@ class SMIRK:
             }
 
             if self.enable_expression:
-                self.real_expression_list.append(real_dict[expression_key])
+                assert len(self.fake_expression_list) == 1, (
+                    "When call feed_one_sample with mode `real`, "
+                    "SMIRK.fake_expression_list should only contain one element. "
+                    "Please check your code!"
+                )
+                expression_dist = F.l1_loss(
+                    real_dict[expression_key], self.fake_expression_list.pop()
+                )
+                self.expression_dist_list.append(expression_dist[None])
             if self.enable_head_pose:
-                self.real_head_pose_list.append(real_dict[headpose_key])
+                assert len(self.fake_head_pose_list) == 1, (
+                    "When call feed_one_sample with mode `real`, "
+                    "SMIRK.fake_head_pose_list should only contain one element. "
+                    "Please check your code!"
+                )
+                head_pose_dist = F.l1_loss(
+                    real_dict[headpose_key], self.fake_head_pose_list.pop()
+                )
+                self.head_pose_dist_list.append(head_pose_dist[None])
 
             # return item (maybe items) for visualization
             if self.enable_vis:

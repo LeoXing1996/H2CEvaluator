@@ -1,18 +1,14 @@
-from typing import Union
-
 import numpy as np
 import torch
 import torch.nn.functional as F
-from accelerate import PartialState
 
-from .dist_utils import gather_all_tensors
+from .dist_utils import gather_tensor_list
+from .metric_utils import SAMPLE_TYPE
 
 try:
     import lpips
 except ImportError:
     print("lpips in not installed, please install it via `pip install lpips`")
-
-SAMPLE_TYPE = Union[torch.Tensor, dict]
 
 
 class LPIPS:
@@ -22,19 +18,9 @@ class LPIPS:
         self.fake_list = []
         self.score_list = []
 
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
-
     def run_evaluation(self):
-        score_list = torch.cat(self.score_list)
-        if PartialState().use_distributed:
-            score = gather_all_tensors(score_list)
-            score = torch.cat(score)
-        else:
-            score = score_list
-
-        score = torch.mean(score).item()
+        score_list = gather_tensor_list(self.score_list)
+        score = torch.mean(score_list).item()
         self.score_list.clear()
         result_dict = {"lpips": score}
         return result_dict

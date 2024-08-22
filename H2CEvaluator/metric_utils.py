@@ -3,8 +3,9 @@ import os
 import os.path as osp
 import shutil
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Union
 
+import torch
 from huggingface_hub import hf_hub_download
 
 DEFAULT_MODEL_REPO = "Leoxing/H2CEvaluator"
@@ -12,6 +13,8 @@ DEFAULT_MODEL_REPO = "Leoxing/H2CEvaluator"
 DEFAULT_CACHE_DIR = osp.abspath(osp.expanduser("~/.cache/H2CEvaluator"))
 
 os.makedirs(DEFAULT_CACHE_DIR, exist_ok=True)
+
+SAMPLE_TYPE = Union[torch.Tensor, dict]
 
 
 def get_dataset_meta(dataset):
@@ -49,7 +52,7 @@ class FileHashItem:
     def check_file(self, local_dir: str) -> bool:
         """Check whether file is exist."""
         local_file_path = osp.join(local_dir, self.file)
-        if not osp.exists(local_file_path):
+        if not osp.exists(local_file_path) or not osp.isfile(local_file_path):
             return False
         else:
             return self.check_hash(local_file_path)
@@ -93,16 +96,16 @@ class MetricModelItems:
                     local_dir=local_basefolder,
                 )
                 if local_subfolder != subfolder:
-                    tar_path = osp.normpath(
+                    tar_folder = osp.normpath(
                         osp.join(
                             local_basefolder,
                             local_subfolder,
                             file.folder,
-                            file.basename,
                         )
                     )
+                    tar_path = osp.join(tar_folder, file.basename)
 
-                    os.makedirs(tar_path, exist_ok=True)
+                    os.makedirs(tar_folder, exist_ok=True)
                     shutil.move(
                         download_path,
                         tar_path,
