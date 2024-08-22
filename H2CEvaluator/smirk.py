@@ -1,5 +1,5 @@
-from typing import Dict, Union, List
-from PIL import Image
+import os.path as osp
+from typing import Dict, List, Union
 
 import cv2
 import mediapipe as mp
@@ -8,8 +8,10 @@ import torch
 import torch.nn.functional as F
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from PIL import Image
 from skimage.transform import estimate_transform, warp
 
+from .metric_utils import DEFAULT_CACHE_DIR, FileHashItem, MetricModelItems
 from .SMIRK.FLAME.FLAME import FLAME
 from .SMIRK.renderer.renderer import Renderer
 from .SMIRK.smirk_encoder import SmirkEncoder
@@ -53,23 +55,71 @@ class SMIRK:
         enable_vis (bool): Whether enable visualization.
     """
 
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "SMIRK_em1.pt",
+                sha256="26b234e3cc31a5de226bcba4321bb5d7343a2ad48234c028b57a1c2f8c2d22d0",
+            ),
+            FileHashItem(
+                "FLAME2020/generic_model.pkl",
+                sha256="efcd14cc4a69f3a3d9af8ded80146b5b6b50df3bd74cf69108213b144eba725b",
+            ),
+            FileHashItem(
+                "landmark_embedding.npy",
+                sha256="8095348eeafce5a02f6bd8765146307f9567a3f03b316d788a2e47336d667954",
+            ),
+            FileHashItem(
+                "l_eyelid.npy",
+                sha256="fa50997166c2f884fbfc577d99fe8707966763fc3d83a1870bb786df6cc9410d",
+            ),
+            FileHashItem(
+                "r_eyelid.npy",
+                sha256="dd78776fed765be4468889dd7d5b54b4bf61c8efbb2869b5b91409ce798aad8d",
+            ),
+            FileHashItem(
+                "FLAME_masks.pkl",
+                sha256="ccefbe1ac0774ff78c68caf2c627b4abc067a6555ebeb0be5d5b0812366ab492",
+            ),
+            FileHashItem(
+                "head_template.obj",
+                sha256="dd5bfbce75adb99b1963f43bca7ec3557bd4a7321f8fc515f4100599e80d99f2",
+            ),
+            FileHashItem(
+                "mediapipe_landmark_embedding.npz",
+                sha256="8863363013fc6fe3752d4318ea02a1784970200616a54b785920cdd0568816fc",
+            ),
+            FileHashItem(
+                "face_landmarker.task",
+                sha256="64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+            ),
+        ],
+        remote_subfolder="smirk",
+    )
+
     def __init__(
         self,
-        model_path: str = "./models/SMIRK_em1.pt",
-        flame_model_path: str = "./models/FLAME2020/generic_model.pkl",
-        flame_lmk_embedding_path: str = "./models/landmark_embedding.npy",
-        flame_l_eyelid_path: str = "./models/l_eyelid.npy",
-        flame_r_eyelid_path: str = "./models/r_eyelid.npy",
-        flame_mask_path: str = "./models/FLAME_masks.pkl",
-        head_template_path: str = "./models/head_template.obj",
-        mediapipe_landmark_embedding: str = "./models/mediapipe_landmark_embedding.npz",
-        mediapipe_detector_path: str = "./models/face_landmarker.task",
+        model_dir: str = osp.join(DEFAULT_CACHE_DIR, "smirk"),
         enable_expression: bool = True,
         enable_head_pose: bool = True,
         crop_face: bool = False,
         render_orig: bool = True,
         enable_vis: bool = True,
     ):
+        self.metric_items.prepare_model(model_dir)
+
+        model_path: str = f"{model_dir}/SMIRK_em1.pt"
+        flame_model_path: str = f"{model_dir}/FLAME2020/generic_model.pkl"
+        flame_lmk_embedding_path: str = f"{model_dir}/landmark_embedding.npy"
+        flame_l_eyelid_path: str = f"{model_dir}/l_eyelid.npy"
+        flame_r_eyelid_path: str = f"{model_dir}/r_eyelid.npy"
+        flame_mask_path: str = f"{model_dir}/FLAME_masks.pkl"
+        head_template_path: str = f"{model_dir}/head_template.obj"
+        mediapipe_landmark_embedding: str = (
+            f"{model_dir}/mediapipe_landmark_embedding.npz"
+        )
+        mediapipe_detector_path: str = f"{model_dir}/face_landmarker.task"
+
         smirk_encoder = SmirkEncoder().cuda()
         checkpoint = torch.load(model_path)
         checkpoint_encoder = {
@@ -158,7 +208,7 @@ class SMIRK:
         return face_landmarks_numpy
 
     def _extract_one_frame(
-        self, frame: Union[torch.Tensor, Image.Image]
+        self, frame: Union[torch.Tensor, np.ndarray]
     ) -> Dict[str, torch.Tensor]:
         """
         Extract face feature and head pose feature for **one frame**.
@@ -173,11 +223,9 @@ class SMIRK:
         """
         if isinstance(frame, torch.Tensor):
             frame_np = (frame.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
-        elif isinstance(frame, Image.Image):
-            frame_np = np.array(frame)
         else:
-            raise TypeError(
-                f"Only support torch.Tensor or Image.Image, but receive {type(frame)}."
+            assert isinstance(frame, np.ndarray), TypeError(
+                f"Only support torch.Tensor or np.ndarray, but receive {type(frame)}."
             )
 
         orig_height, orig_width = frame_np.shape[0], frame_np.shape[1]
@@ -267,8 +315,10 @@ class SMIRK:
         """Feed one sample.
 
         Args:
-            sample (torch.Tensor or Dict): If sample is torch.Tensor, tensor
-                is shape in [F, C, H, W], order in RGB, range in (0, 1).
+            sample (torch.Tensor | dict): If sample is tensor, sample should be
+                [F, C, H, W], order in RGB, range in (0, 1). Otherwise, is dict
+                with list of np.ndarray. The length of list is F and all elements
+                are un-processed, in [0, 255], [B, H, W, C].
         """
 
         expression_key = "transformed_vertices"  # TODO: maybe use other keys
@@ -305,7 +355,7 @@ class SMIRK:
 
         elif mode == "real":
             real_dict_list = []
-            real_sample: List[Image.Image] = sample["pose_images"]
+            real_sample: List[np.ndarray] = sample["driving_video"]
             for frame in real_sample:
                 real_dict_ = self._extract_one_frame(frame)
                 real_dict_list.append(real_dict_)
