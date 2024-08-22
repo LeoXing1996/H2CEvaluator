@@ -1,54 +1,46 @@
-from typing import Union
+import os.path as osp
 
 import torch
 import torch.nn.functional as F
-from accelerate import PartialState
 
 from .arcface_torch.backbones import get_model
-from .dist_utils import gather_all_tensors
-
-SAMPLE_TYPE = Union[torch.Tensor, dict]
+from .dist_utils import gather_tensor_list
+from .metric_utils import DEFAULT_CACHE_DIR, FileHashItem, MetricModelItems, SAMPLE_TYPE
 
 
 class ArcFace:
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "glint360k_cosface_r100_fp16_0.1.pth",
+                sha256="5f631718e783448b41631e15073bdc622eaeef56509bbad4e5085f23bd32db83",
+            )
+        ],
+        remote_subfolder="arcface",
+    )
+
     def __init__(
         self,
+        model_dir: str = osp.join(DEFAULT_CACHE_DIR, "arcface"),
         model_type="r100",
-        model_path="./models/glint360k_cosface_r100_fp16_0.1",
     ):
+        self.metric_items.prepare_model(model_dir)
+        model_path = f"{model_dir}/glint360k_cosface_r100_fp16_0.1.pth"
         self.face_model = get_model(model_type, fp16=True)
         self.face_model.load_state_dict(torch.load(model_path))
         self.face_model.cuda()
         self.face_model.train(False)
 
-        self.real_feat = []
         self.fake_feat = []
-
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
+        self.arcface_dist_list = []
 
     def run_evaluation(self):
-        if len(self.real_feat) > 1:
-            fake_feat = torch.cat(self.fake_feat)
-            real_feat = torch.cat(self.real_feat)
-        else:
-            fake_feat = self.fake_feat[0]
-            real_feat = self.real_feat[0]
+        arcface_dist = gather_tensor_list(self.arcface_dist_list)
+        arcface_dist = torch.mean(arcface_dist).item()
 
-        if PartialState().use_distributed:
-            real_feat = gather_all_tensors(real_feat)
-            fake_feat = gather_all_tensors(fake_feat)
+        self.arcface_dist_list.clear()
 
-            fake_feat = torch.cat(fake_feat)
-            real_feat = torch.cat(real_feat)
-
-        cosine_dist = F.cosine_similarity(real_feat, fake_feat, dim=1).mean()
-
-        self.real_feat.clear()
-        self.fake_feat.clear()
-
-        result_dict = {"arcface_score": cosine_dist.item()}
+        result_dict = {"arcface_score": arcface_dist}
         return result_dict
 
     @torch.no_grad()
@@ -76,9 +68,18 @@ class ArcFace:
             ref_samples = F.interpolate(ref_samples, size=(112, 112)).repeat(
                 self.fake_feat[-1].shape[0], 1, 1, 1
             )
-
             real_feat = self.face_model(ref_samples.cuda().half())
-            self.real_feat.append(real_feat / torch.norm(real_feat, dim=1)[:, None])
+
+            assert len(self.fake_feat) == 1, (
+                "When call feed_one_sample with mode `real`, "
+                "ArcFace.fake_list should only contain one element. "
+                "Please check your code!"
+            )
+
+            arcface_dist = F.cosine_similarity(
+                self.fake_feat.pop(), F.normalize(real_feat), dim=1
+            ).mean()
+            self.arcface_dist_list.append(arcface_dist[None])
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

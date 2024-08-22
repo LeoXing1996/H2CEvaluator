@@ -1,4 +1,4 @@
-from typing import Union
+import os.path as osp
 
 import numpy as np
 import torch
@@ -6,15 +6,29 @@ import torch.nn.functional as F
 
 from .fid import FID
 
-SAMPLE_TYPE = Union[torch.Tensor, dict]
+from .metric_utils import (
+    DEFAULT_CACHE_DIR,
+    SAMPLE_TYPE,
+    FileHashItem,
+    MetricModelItems,
+)
 
 
 class FVD(FID):
-    def __init__(
-        self,
-        model_path: str = "./work_dirs/eval/i3d_torchscript.pt",
-    ):
-        self.inception = torch.load(model_path).cuda()
+    metric_items = MetricModelItems(
+        file_list=[
+            FileHashItem(
+                "i3d_torchscript.pt",
+                sha256="bec6519f66ea534e953026b4ae2c65553c17bf105611c746d904657e5860a5e2",
+            ),
+        ],
+        remote_subfolder="fvd",
+    )
+
+    def __init__(self, model_dir: str = osp.join(DEFAULT_CACHE_DIR, "fvd")):
+        self.metric_items.prepare_model(model_dir)
+        model_path = f"{model_dir}/i3d_torchscript.pt"
+        self.inception = torch.jit.load(model_path).cuda()
 
         self.inception_kwargs = {
             "rescale": False,

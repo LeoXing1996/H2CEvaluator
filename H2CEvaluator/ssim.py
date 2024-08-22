@@ -3,9 +3,8 @@ from typing import Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-from accelerate import PartialState
 
-from .dist_utils import gather_all_tensors
+from .dist_utils import gather_tensor_list
 
 try:
     from pytorch_msssim import SSIM as SSIM_Metric
@@ -25,21 +24,13 @@ class SSIM:
         self.fake_list = []
         self.score_list = []
 
-    def prepare(self, *args, **kwargs):
-        """Do not need prepare. Do nothing."""
-        return
-
     def run_evaluation(self):
-        score_list = torch.cat(self.score_list)
-        if PartialState().use_distributed:
-            score = gather_all_tensors(score_list)
-            score = torch.cat(score)
-        else:
-            score = score_list
+        ssim_list = gather_tensor_list(self.score_list)
+        ssim = torch.mean(ssim_list).item()
 
-        score = torch.mean(score).item()
         self.score_list.clear()
-        result_dict = {"ssim": score}
+
+        result_dict = {"ssim": ssim}
         return result_dict
 
     @torch.no_grad()
