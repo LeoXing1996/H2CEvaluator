@@ -1,7 +1,0 @@
-  width: 512
-  height: 512
-  max_frames: 30
-  interval: 2
-  default_fps: 30
-  reference_image_root: /mnt/hwfile/mm_lol/sunyanan/share_data/datasets/portrait_animation_benchmark/reference/images
-  driving_video_root: /mnt/hwfile/mm_lol/sunyanan/share_data/datasets/portrait_animation_benchmark/driving/videos

@@ -8,10 +8,79 @@ import imageio
 from accelerate.utils.tqdm import tqdm
 from torch.utils.data import DataLoader
 
-from H2CEvaluator.fid import FID
-from H2CEvaluator.fvd import FVD
-from H2CEvaluator.metric_utils import get_dataset_meta
-from H2CEvaluator.evaluator import custom_collate_fn
+from ..fid import FID
+from ..fvd import FVD
+from ..metric_utils import get_dataset_meta, DEFAULT_CACHE_DIR
+from ..evaluator import custom_collate_fn
+
+
+def get_args():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--reference-image-root",
+        type=str,
+        help="Path to reference image.",
+    )
+    parser.add_argument(
+        "--driving-video-root",
+        type=str,
+        help="Path to driving video.",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to config file",
+    )
+
+    parser.add_argument(
+        "--fid",
+        action="store_true",
+        help="whether preprocess feature for FID",
+    )
+    parser.add_argument(
+        "--fvd",
+        action="store_true",
+        help="whether preprocess feature for FVD",
+    )
+    parser.add_argument(
+        "--fid-model-dir",
+        type=str,
+        default=osp.join(DEFAULT_CACHE_DIR, "fid"),
+        help="Path to FID model directory.",
+    )
+    parser.add_argument(
+        "--fvd-model-dir",
+        type=str,
+        default=osp.join(DEFAULT_CACHE_DIR, "fvd"),
+        help="Path to FVD model directory.",
+    )
+    parser.add_argument(
+        "--cache-path",
+        type=str,
+        default=DEFAULT_CACHE_DIR,
+        help="path to save cache feature.",
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Whether overwriote cache when exists.",
+    )
+    parser.add_argument(
+        "--eval-mode",
+        type=str,
+        choices=["debug", "fast", "normal"],
+        default="normal",
+        help="Evaluation mode. If not normal, only use part of the data to evaluate the script.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=16,
+        help="Number of workers for dataloader.",
+    )
+    args = parser.parse_args()
+    return args
 
 
 class TestDataset(object):
@@ -158,16 +227,32 @@ class TestDataset(object):
         return len(self.samples)
 
 
-def main(args):
+def main():
+    args = get_args()
     cache_path = args.cache_path
     os.makedirs(cache_path, exist_ok=True)
 
-    config = OmegaConf.load(args.config)
+    if args.config is None:
+        config = osp.join(osp.dirname(__file__), "default_config.yaml")
+    else:
+        config = args.config
+
+    config = OmegaConf.load(config)
+
+    if args.reference_image_root is not None:
+        reference_image_root = args.reference_image_root
+    else:
+        reference_image_root = config.reference_image_root
+
+    if args.driving_video_root is not None:
+        driving_video_root = args.driving_video_root
+    else:
+        driving_video_root = config.driving_video_root
 
     dataset = TestDataset(
         config,
-        args.reference_image_root,
-        args.driving_video_root,
+        reference_image_root,
+        driving_video_root,
     )
 
     def worker_init_fn(worker_id):
@@ -185,7 +270,7 @@ def main(args):
     metric_list = []
     metric_cache_list = []
     if args.fid:
-        fid = FID(args.fid_model_path)
+        fid = FID(args.fid_model_dir)
         fid_cache_path = fid.get_real_feat_cache_path(dataset, cache_path)
 
         if osp.exists(fid_cache_path):
@@ -200,7 +285,7 @@ def main(args):
             metric_cache_list.append(fid_cache_path)
 
     if args.fvd:
-        fvd = FVD(args.fvd_model_path)
+        fvd = FVD(args.fvd_model_dir)
         fvd_cache_path = fvd.get_real_feat_cache_path(dataset, cache_path)
 
         if osp.exists(fvd_cache_path):
@@ -235,74 +320,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument(
-        "--reference-image-root",
-        type=str,
-        help="Path to reference image.",
-    )
-    parser.add_argument(
-        "--driving-video-root",
-        type=str,
-        help="Path to driving video.",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        help="Path to config file",
-    )
-
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=4,
-        help="Batch size for extract inception feature.",
-    )
-
-    parser.add_argument(
-        "--fid",
-        action="store_true",
-        help="whether preprocess feature for FID",
-    )
-    parser.add_argument(
-        "--fvd",
-        action="store_true",
-        help="whether preprocess feature for FVD",
-    )
-    parser.add_argument(
-        "--fid-model-path",
-        type=str,
-        default="",
-    )
-    parser.add_argument(
-        "--fvd-model-path",
-        type=str,
-        default="",
-    )
-    parser.add_argument(
-        "--cache-path",
-        type=str,
-        default=".cache",
-        help="path to save cache feature",
-    )
-
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Whether overwriote cache when exists.",
-    )
-    parser.add_argument(
-        "--eval-mode",
-        type=str,
-        choices=["debug", "fast", "normal"],
-        default="normal",
-        help="Evaluation mode. If not normal, only use part of the data to evaluate the script.",
-    )
-    parser.add_argument(
-        "--num-workers",
-        type=int,
-        default=16,
-        help="Number of workers for dataloader.",
-    )
-    args = parser.parse_args()
-    main(args)
+    main()

@@ -149,13 +149,13 @@ metrics:
 #### 2.7 [FID](./H2CEvaluator/fid.py) and [FVD](./H2CEvaluator/fvd.py)
 
 You need to prepare the inception feature for real data via `scripts/prepreocess_inception.py`.
-Please refer to [this document](./scripts/README.md) for more information.
+Please refer to [this document](./H2CEvaluator/scripts/README.md) for more information.
 
 ```yaml
 metrics:
-  - type: "FID"
+  - type: FID
     cache_path: ~/.cache/H2CEvaluator/fid_real_cache_17edbf9bf460120eb820adc439279af7.pt  # path to inception feature
-  - type: "FVD"
+  - type: FVD
     cache_path: ~/.cache/H2CEvaluator/fvd_real_cache_17edbf9bf460120eb820adc439279af7.pt  # path to inception feature
 ```
 

@@ -14,7 +14,12 @@ if __name__ == "__main__":
         license="Apache 2.0 License",
         author="leo",
         author_email="xingzhening@pjlab.org.cn",
-        packages=find_packages("H2CEvaluator"),
+        packages=find_packages(),
+        entry_points={
+            "console_scripts": [
+                "preprocess-inception = H2CEvaluator.scripts.preprocess_inception:main",
+            ]
+        },
         python_requires=">=3.10.0",
         # install_requires=deps,
     )
