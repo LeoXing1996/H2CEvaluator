@@ -1,0 +1,5 @@
+width: 512
+height: 512
+max_frames: 30
+interval: 2
+default_fps: 30
