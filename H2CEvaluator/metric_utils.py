@@ -2,7 +2,9 @@ import hashlib
 import os
 import os.path as osp
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import cache
 from typing import List, Optional, Union
 
 import torch
@@ -25,14 +27,27 @@ def get_dataset_meta(dataset):
         "max_frames",
         "interval",
         "default_fps",
-        "samples",
     ]
     dataset_kwargs = {k: dataset.__dict__.get(k, None) for k in dataset_identity}
+
+    samples_md5 = []
+    with ThreadPoolExecutor() as executor:
+        samples_md5.extend(
+            executor.map(
+                lambda ref, dri: (get_hash(ref), get_hash(dri)),
+                *zip(*dataset.samples),
+            )
+        )
+
+    samples_md5.sort()
+    dataset_kwargs["samples_md5"] = samples_md5
     md5 = hashlib.md5(str(dataset_kwargs).encode()).hexdigest()
     dataset_kwargs["md5"] = md5
+    dataset_kwargs["samples"] = dataset.samples
     return dataset_kwargs, md5
 
 
+@cache
 def get_hash(file):
     """
     Return sha256 hash of file
