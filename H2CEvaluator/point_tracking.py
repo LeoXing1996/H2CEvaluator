@@ -72,6 +72,8 @@ class PointTracking:
             detector_checkpoint,
             pose_checkpoint,
         )
+        self.detector = self.detector.cuda()
+        self.pose_estimator = self.pose_estimator.cuda()
 
         self.fake_track_list = []
         self.distance_list = []

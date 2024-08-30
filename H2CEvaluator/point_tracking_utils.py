@@ -22,13 +22,13 @@ def init_model(
     det_checkpoint,
     pose_checkpoint,
 ):
-    detector = init_detector(det_config, det_checkpoint, "cuda")
+    detector = init_detector(det_config, det_checkpoint, device="cpu")
     detector.cfg = adapt_mmdet_pipeline(detector.cfg)
 
     pose_estimator = init_pose_estimator(
         pose_config,
         pose_checkpoint,
-        device="cuda",
+        device="cpu",
         cfg_options=dict(model=dict(test_cfg=dict(output_heatmaps=False))),
     )
 
