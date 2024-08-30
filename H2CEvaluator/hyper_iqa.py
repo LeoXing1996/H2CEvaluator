@@ -26,11 +26,11 @@ class HyperIQA:
     ):
         self.metric_items.prepare_model(model_dir)
         model_path = f"{model_dir}/koniq_pretrained.pkl"
-        model_hyper = HyperNet(16, 112, 224, 112, 56, 28, 14, 7).cuda()
+        model_hyper = HyperNet(16, 112, 224, 112, 56, 28, 14, 7)
         model_hyper.train(False)
 
-        model_hyper.load_state_dict((torch.load(model_path)))
-        self.model = model_hyper
+        model_hyper.load_state_dict((torch.load(model_path, map_location="cpu")))
+        self.model = model_hyper.cuda()
 
         transforms = torchvision.transforms.Compose(
             [
