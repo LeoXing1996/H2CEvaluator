@@ -27,8 +27,8 @@ class ArcFace:
         self.metric_items.prepare_model(model_dir)
         model_path = f"{model_dir}/glint360k_cosface_r100_fp16_0.1.pth"
         self.face_model = get_model(model_type, fp16=True)
-        self.face_model.load_state_dict(torch.load(model_path))
-        self.face_model.cuda()
+        self.face_model.load_state_dict(torch.load(model_path, map_location="cpu"))
+        self.face_model = self.face_model.cuda()
         self.face_model.train(False)
 
         self.fake_feat = []

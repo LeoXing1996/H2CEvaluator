@@ -120,8 +120,8 @@ class SMIRK:
         )
         mediapipe_detector_path: str = f"{model_dir}/face_landmarker.task"
 
-        smirk_encoder = SmirkEncoder().cuda()
-        checkpoint = torch.load(model_path)
+        smirk_encoder = SmirkEncoder()
+        checkpoint = torch.load(model_path, map_location="cpu")
         checkpoint_encoder = {
             k.replace("smirk_encoder.", ""): v
             for k, v in checkpoint.items()
@@ -153,7 +153,7 @@ class SMIRK:
         )
         self.detector = vision.FaceLandmarker.create_from_options(options)
 
-        self.encoder = smirk_encoder
+        self.encoder = smirk_encoder.cuda()
         self.flame = flame
         self.renderer = renderer
 
