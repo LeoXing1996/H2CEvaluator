@@ -94,6 +94,8 @@ class TestDataset(object):
         self.width = config.width
         self.height = config.height
         self.max_frames = config.max_frames
+        self.min_frames = config.min_frames
+        assert self.min_frames >= 10, "The number of frames must be no smaller than 10."
         self.interval = config.interval
         self.default_fps = config.default_fps
 
@@ -113,12 +115,6 @@ class TestDataset(object):
             ), "Only support 'debug', 'fast' and 'normal' mode."
         for src in reference_image_paths:
             for driving in driving_video_paths:
-                if "chenglong" in driving:
-                    continue
-                if "huangxiaoming" in driving:
-                    continue
-                if "zhouxingchi" in driving:
-                    continue
                 reference_image_path = os.path.join(reference_image_root, src)
                 driving_video_path = os.path.join(driving_video_root, driving)
                 samples.append((reference_image_path, driving_video_path))
@@ -161,6 +157,11 @@ class TestDataset(object):
         if os.path.isfile(driving_video_path):
             reader = imageio.get_reader(driving_video_path)
             fps = reader.get_meta_data()["fps"]
+            nframes = len(reader)
+            adaptive_interval = min(self.interval, nframes // self.min_frames)
+            assert (
+                adaptive_interval > 0
+            ), f"Unsupported interval {adaptive_interval} (must be greater than 0)"
             driving_width = reader.get_meta_data()["size"][0]
             driving_height = reader.get_meta_data()["size"][1]
             driving_video = []
@@ -173,7 +174,7 @@ class TestDataset(object):
             for im in reader:
                 if self.max_frames > 0 and len(driving_video) >= self.max_frames:
                     break
-                if counter % self.interval != 0:
+                if counter % adaptive_interval != 0:
                     counter += 1
                     continue
                 else:
@@ -187,7 +188,13 @@ class TestDataset(object):
         else:
             driving_video = []
             fps = self.default_fps
-            for frame_name in sorted(os.listdir(driving_video_path))[:: self.interval]:
+            filenames = sorted(os.listdir(driving_video_path))
+            nframes = len(filenames)
+            adaptive_interval = min(self.interval, nframes // self.min_frames)
+            assert (
+                adaptive_interval > 0
+            ), f"Unsupported interval {adaptive_interval} (must be greater than 0)"
+            for frame_name in filenames[::adaptive_interval]:
                 if self.max_frames > 0 and len(driving_video) >= self.max_frames:
                     break
                 save_name_list.append(
@@ -200,10 +207,6 @@ class TestDataset(object):
                 driving_height = im.shape[0]
                 im = self.conditioned_resize(im)
                 driving_video.append(im)
-            if len(driving_video) < 10:
-                print(
-                    f"Warning: {driving_video_path} has {len(os.listdir(driving_video_path))} frames."
-                )
         width = driving_video[0].shape[1]
         height = driving_video[0].shape[0]
 
