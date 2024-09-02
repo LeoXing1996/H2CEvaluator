@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from typing import Dict, List, Optional, Union
+import simplejson as json
 
 import numpy as np
 import torch
@@ -12,8 +13,11 @@ from PIL import Image
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.distributed import DistributedSampler
+import logging
 
 METRIC_CONFIG_TYPE = Optional[List[Union[str, dict]]]
+
+logger = logging.getLogger(__file__)
 
 
 def is_list_of(seq: List, target):
@@ -39,13 +43,6 @@ class Evaluator:
             Seed for generator may be contained in this dict and be popped to
             create a new generator for evaluation.
         metric_list (METRIC_CONFIG_TYPE): List of config for metrics.
-
-        save_image (bool): Whether save generated results and intermedia results
-            from metrics.
-        save_keys (Optional[List]): Keys to save. If not passed, only generated
-            image (video) will be saved.
-        save_as_frames (bool): Save video for individual frames.
-        save_path (Optional[str]): Path to save results.
     """
 
     def __init__(
@@ -53,19 +50,13 @@ class Evaluator:
         dataset: Dataset,
         pipeline_kwargs: Optional[dict] = None,
         metric_list: METRIC_CONFIG_TYPE = None,
-        save_image: bool = False,
-        save_keys: Optional[List] = None,
-        save_as_frames: bool = False,
-        save_path: Optional[str] = None,
     ):
         self.metric_list = self.build_metrics(metric_list, dataset)
 
         self.dataloader = self.build_dataloader(dataset)
 
-        self.save_image = save_image
-        self.save_keys = save_keys
-        self.save_as_frames = save_as_frames
-        self.save_path = save_path
+        if pipeline_kwargs is None:
+            pipeline_kwargs = {}
 
         self.pipeline_kwargs = deepcopy(pipeline_kwargs)
 
@@ -203,43 +194,93 @@ class Evaluator:
 
         return dataloader
 
-    def run_eval(self, pipeline):
+    def run_eval(
+        self,
+        pipeline,
+        save_path: str,
+        no_eval: bool = False,
+        no_vis: bool = False,
+        eval_samples: int = -1,
+        vis_samples: int = -1,
+        save_as_frames: bool = False,
+    ):
         """
         Here we assume all metrics use the same types of data pair
         (e.g., face generation / face reconstruction).
-        """
-        pbar = tqdm(total=len(self.dataloader))
 
+        Args:
+            pipeline: Inference pipeline to generate results.
+            save_path (str): Path to save results. The evaluation and visualization
+                results will be saved to this folder.
+            no_eval (bool): If true, will not run evaluation.
+            no_vis (bool): If true, will not save visualization results.
+            eval_samples (int): Number of samples to evaluate. If -1, will evaluate all samples.
+            vis_samples (int): Number of samples to visualize. If -1, will visualize all samples.
+            save_meta_info (bool): Whether save meta info. If true, will save a meta info
+            save_as_frames (bool): Whether save results as individual frames.
+        """
+        pbar_length = len(self.dataloader)
+        if vis_samples > 0:
+            pbar_length = min(vis_samples, pbar_length)
+        if eval_samples > 0:
+            pbar_length = min(eval_samples, pbar_length)
+        pbar = tqdm(total=pbar_length)
+
+        if no_eval and no_vis:
+            logger.warning("Both no_eval and no_vis are True. Nothing to do.")
+            return {}
+
+        meta_info_list = []
         for idx, data in enumerate(self.dataloader):
+            should_eval = (eval_samples == -1 or idx < eval_samples) and not no_eval
+            should_vis = (vis_samples == -1 or idx < vis_samples) and not no_vis
+
+            if not should_eval and not should_vis:
+                break
+
             # handle save_name
             save_name = data.pop("save_name", None)
             save_name_list = data.pop("save_name_list", None)
+            reference_name = data.pop("reference_filename", "null")
+            driving_name = data.pop("driving_filename", "null")
 
-            video = pipeline(
+            output = pipeline(
                 **data,
                 **self.pipeline_kwargs,
-            ).videos[0]  # [F, 3, H, W]
+            )
+            video = output.videos[0]  # [F, 3, H, W]
+            cond = output.conditions[0]  # [F, 3, H, W]
 
             # build a vis dict
             extra_vis_dict = {}
 
-            for metric in self.metric_list:
-                fake_vis_dict = metric.feed_one_sample(video, mode="fake")
-                real_vis_dict = metric.feed_one_sample(data, mode="real")
-                extra_vis_dict.update(fake_vis_dict)
-                extra_vis_dict.update(real_vis_dict)
+            if should_eval:
+                for metric in self.metric_list:
+                    fake_vis_dict = metric.feed_one_sample(video, mode="fake")
+                    real_vis_dict = metric.feed_one_sample(data, mode="real")
+                    extra_vis_dict.update(fake_vis_dict)
+                    extra_vis_dict.update(real_vis_dict)
 
-            if self.save_image:
-                if self.save_as_frames:
+            meta_info = {
+                "reference_name": reference_name,
+                "driving_name": driving_name,
+            }
+            if should_vis:
+                vis_save_path = os.path.join(save_path, "vis")
+                if save_as_frames:
                     if save_name_list is None:
                         if PartialState().use_distributed:
                             save_name_template = f"{idx}_{{}}_rank{PartialState().local_process_index}.png"
                         else:
                             save_name_template = f"{idx}_{{}}.png"
                         save_name_list = [
-                            save_name_template.format(j) for j in range(video.shape[0])
+                            os.path.join(vis_save_path, save_name_template.format(j))
+                            for j in range(video.shape[0])
                         ]
-                    self.save_video_frames(video, data, extra_vis_dict, save_name_list)
+                    self.save_video_frames(
+                        video, cond, data, extra_vis_dict, save_name_list
+                    )
+                    meta_info["save_name_list"] = save_name_list
                 else:
                     if save_name is None:
                         if PartialState().use_distributed:
@@ -248,8 +289,16 @@ class Evaluator:
                             )
                         else:
                             save_name = f"{idx}.mp4"
-                    self.save_video(video, data, extra_vis_dict, save_name)
+                    self.save_video(
+                        video,
+                        cond,
+                        data,
+                        extra_vis_dict,
+                        os.path.join(save_path, save_name),
+                    )
+                    meta_info["save_name"] = save_name
 
+            meta_info_list.append(meta_info)
             pbar.update(1)
 
         result = {}
@@ -257,11 +306,16 @@ class Evaluator:
             metric_res = metric.run_evaluation()
             result.update(metric_res)
 
+        result_path = os.path.join(save_path, "result.json")
+        with open(result_path, "w") as file:
+            json.dump({"result": result, "meta_info": meta_info_list}, file, indent=4)
+
         return result
 
     def save_video_frames(
         self,
         video: torch.Tensor,
+        cond: torch.Tensor,
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name_list: List[str],
@@ -270,19 +324,23 @@ class Evaluator:
         Save one video as frames.
 
         Default
-        +-------+---------+-----+-------+
-        | Ref   | Driving | Gen | Extra |
-        +-------+---------+-----+-------+
+        +-------+---------+------+-----+-------+
+        | Ref   | Driving | Cond | Gen | Extra |
+        +-------+---------+------+-----+-------+
         """
         video = video.permute(0, 2, 3, 1)
+        cond = cond.permute(0, 2, 3, 1)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
-        for i, image in enumerate(video):
+        for i, (image, cond_image) in enumerate(zip(video, cond)):
             res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
+            cond_image_pil = Image.fromarray(
+                (cond_image.numpy() * 255).astype(np.uint8)
+            )
             # Save ref_image, src_fimage and the generated_image
             w, h = res_image_pil.size
-            canvas = Image.new("RGB", (w * (3 + n_extra_items), h), "white")
+            canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
 
             ref_image_pil = (
                 Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
@@ -293,24 +351,25 @@ class Evaluator:
 
             canvas.paste(ref_image_pil, (0, 0))
             canvas.paste(origin_image_pil, (w, 0))
-            canvas.paste(res_image_pil, (w * 2, 0))
+            canvas.paste(cond_image_pil.resize((w, h)), (w * 2, 0))
+            canvas.paste(res_image_pil, (w * 3, 0))
 
             for k in extra_keys:
                 canvas.paste(
                     Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
-                    (w * (3 + extra_keys.index(k)), 0),
+                    (w * (4 + extra_keys.index(k)), 0),
                 )
 
             sample_name = save_name_list[i]
             img = canvas
-            out_file = os.path.join(self.save_path, sample_name)
-            os.makedirs(os.path.dirname(out_file), exist_ok=True)
+            os.makedirs(os.path.dirname(sample_name, exist_ok=True))
 
-            img.save(out_file)
+            img.save(sample_name)
 
     def save_video(
         self,
         video: torch.Tensor,
+        cond: torch.Tensor,
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name: str,
@@ -319,39 +378,43 @@ class Evaluator:
         Save one video.
 
         Default
-        +-------+---------+-----+-------+
-        | Ref   | Driving | Gen | Extra |
-        +-------+---------+-----+-------+
+        +-------+---------+------+-----+-------+
+        | Ref   | Driving | Cond | Gen | Extra |
+        +-------+---------+------+-----+-------+
         """
         video = video.permute(0, 2, 3, 1)
+        cond = cond.permute(0, 2, 3, 1)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
-        out_file = os.path.join(self.save_path, save_name)
-        os.makedirs(os.path.dirname(out_file), exist_ok=True)
-        writer = imageio.get_writer(out_file, fps=24)
+        os.makedirs(os.path.dirname(save_name), exist_ok=True)
+        writer = imageio.get_writer(save_name, fps=24)
 
-        for i, image in enumerate(video):
+        for i, (image, cond_image) in enumerate(zip(video, cond)):
             res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
+            cond_image_pil = Image.fromarray(
+                (cond_image.numpy() * 255).astype(np.uint8)
+            )
             # Save ref_image, src_fimage and the generated_image
             w, h = res_image_pil.size
-            canvas = Image.new("RGB", (w * (3 + n_extra_items), h), "white")
+            canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
 
             ref_image_pil = (
                 Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
             )
-            origin_image_pil = (
+            dri_image_pil = (
                 Image.fromarray(data["driving_video"][i]).convert("RGB").resize((w, h))
             )
 
             canvas.paste(ref_image_pil, (0, 0))
-            canvas.paste(origin_image_pil, (w, 0))
-            canvas.paste(res_image_pil, (w * 2, 0))
+            canvas.paste(dri_image_pil, (w, 0))
+            canvas.paste(cond_image_pil.resize((w, h)), (w * 2, 0))
+            canvas.paste(res_image_pil, (w * 3, 0))
 
             for k in extra_keys:
                 canvas.paste(
                     Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
-                    (w * (3 + extra_keys.index(k)), 0),
+                    (w * (4 + extra_keys.index(k)), 0),
                 )
 
             img = canvas

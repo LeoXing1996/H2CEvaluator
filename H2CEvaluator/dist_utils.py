@@ -78,11 +78,16 @@ def gather_all_tensors(
 def gather_tensor_list(tensor_list):
     if len(tensor_list) > 1:
         res = torch.cat(tensor_list)
-    else:
+    elif len(tensor_list) == 1:
         res = tensor_list[0]
+    else:
+        # no tensor to gather on this rank
+        # create a empty tensor with 2-dimension to avoid gather error
+        res = torch.randn(0, 0).cuda()
 
     if PartialState().use_distributed:
-        res = gather_all_tensors(res)
+        res = [r for r in gather_all_tensors(res) if all([(s != 0) for s in r.size()])]
+        print(res)
         res = torch.cat(res)
 
     return res
