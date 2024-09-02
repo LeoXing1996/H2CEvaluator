@@ -87,7 +87,6 @@ def gather_tensor_list(tensor_list):
 
     if PartialState().use_distributed:
         res = [r for r in gather_all_tensors(res) if all([(s != 0) for s in r.size()])]
-        print(res)
         res = torch.cat(res)
 
     return res
