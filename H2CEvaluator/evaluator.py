@@ -220,10 +220,8 @@ class Evaluator:
             save_as_frames (bool): Whether save results as individual frames.
         """
         pbar_length = len(self.dataloader)
-        if vis_samples > 0:
-            pbar_length = min(vis_samples, pbar_length)
-        if eval_samples > 0:
-            pbar_length = min(eval_samples, pbar_length)
+        if max(vis_samples, eval_samples) > 0:
+            pbar_length = min(max(vis_samples, eval_samples), pbar_length)
         pbar = tqdm(total=pbar_length)
 
         if no_eval and no_vis:
@@ -264,6 +262,7 @@ class Evaluator:
             meta_info = {
                 "reference_name": reference_name,
                 "driving_name": driving_name,
+                "used_for_eval": should_eval,
             }
             if should_vis:
                 vis_save_path = os.path.join(save_path, "vis")
@@ -306,9 +305,23 @@ class Evaluator:
             metric_res = metric.run_evaluation()
             result.update(metric_res)
 
-        result_path = os.path.join(save_path, "result.json")
-        with open(result_path, "w") as file:
-            json.dump({"result": result, "meta_info": meta_info_list}, file, indent=4)
+        # gather sync meta-info across device
+        if PartialState().use_distributed:
+            import torch.distributed as dist
+
+            gathered_info_list = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(gathered_info_list, meta_info_list)
+            meta_info_list = []
+            for info_list in gathered_info_list:
+                meta_info_list.extend(info_list)
+        if PartialState().is_main_process:
+            result_path = os.path.join(save_path, "result.json")
+            with open(result_path, "w") as file:
+                json.dump(
+                    {"result": result, "meta_info": meta_info_list},
+                    file,
+                    indent=4,
+                )
 
         return result
 
