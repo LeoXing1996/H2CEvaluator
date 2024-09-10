@@ -242,12 +242,27 @@ class Evaluator:
             reference_name = data.pop("reference_filename", "null")
             driving_name = data.pop("driving_filename", "null")
 
-            output = pipeline(
-                **data,
-                **self.pipeline_kwargs,
-            )
-            video = output.videos[0]  # [F, 3, H, W]
-            cond = output.conditions[0]  # [F, 3, H, W]
+            meta_info = {
+                "reference_name": reference_name,
+                "driving_name": driving_name,
+                "used_for_eval": should_eval,
+            }
+
+            meta_info_list.append(meta_info)
+
+            try:
+                output = pipeline(
+                    **data,
+                    **self.pipeline_kwargs,
+                )
+                video = output.videos[0]  # [F, 3, H, W]
+                cond = output.conditions[0]  # [F, 3, H, W]
+                meta_info["success"] = True
+
+            except Exception as e:
+                meta_info["success"] = False
+                meta_info["exception"] = str(e)
+                continue
 
             # build a vis dict
             extra_vis_dict = {}
@@ -258,12 +273,6 @@ class Evaluator:
                     real_vis_dict = metric.feed_one_sample(data, mode="real")
                     extra_vis_dict.update(fake_vis_dict)
                     extra_vis_dict.update(real_vis_dict)
-
-            meta_info = {
-                "reference_name": reference_name,
-                "driving_name": driving_name,
-                "used_for_eval": should_eval,
-            }
             if should_vis:
                 vis_save_path = os.path.join(save_path, "vis")
                 if save_as_frames:
@@ -297,7 +306,6 @@ class Evaluator:
                     )
                     meta_info["save_name"] = save_name
 
-            meta_info_list.append(meta_info)
             pbar.update(1)
 
         result = {}
@@ -374,10 +382,14 @@ class Evaluator:
                 )
 
             sample_name = save_name_list[i]
-            img = canvas
+            sample_suffix = sample_name.split(".")[-1]
+            sample_combine_name = sample_name.replace(
+                f".{sample_suffix}", f"_comb.{sample_suffix}"
+            )
             os.makedirs(os.path.dirname(sample_name, exist_ok=True))
 
-            img.save(sample_name)
+            res_image_pil.save(sample_name)
+            canvas.save(sample_combine_name)
 
     def save_video(
         self,
@@ -402,6 +414,10 @@ class Evaluator:
 
         os.makedirs(os.path.dirname(save_name), exist_ok=True)
         writer = imageio.get_writer(save_name, fps=24)
+
+        save_suffix = save_name.split(".")[-1]
+        combine_name = save_name.replace(f".{save_suffix}", f"_comb.{save_suffix}")
+        writer_comb = imageio.get_writer(combine_name)
 
         for i, (image, cond_image) in enumerate(zip(video, cond)):
             res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
@@ -431,6 +447,7 @@ class Evaluator:
                 )
 
             img = canvas
-            writer.append_data(np.array(img))
+            writer_comb.append_data(np.array(img))
+            writer.append_data(np.array(res_image_pil))
 
         writer.close()
