@@ -329,7 +329,7 @@ class SMIRK:
                 are un-processed, in [0, 255], [B, H, W, C].
         """
 
-        expression_key = "transformed_vertices"
+        expression_key = ["expression_params", "eyelid_params", "jaw_params"]
         headpose_key = "pose_params"
         vis_key = "rerender_frame"
 
@@ -344,7 +344,9 @@ class SMIRK:
                 k: torch.cat([d[k] for d in fake_dict_list], dim=0) for k in keys
             }
             if self.enable_expression:
-                self.fake_expression_list.append(fake_dict[expression_key])
+                self.fake_expression_list.append(
+                    {k: fake_dict[k] for k in expression_key}
+                )
             if self.enable_head_pose:
                 self.fake_head_pose_list.append(fake_dict[headpose_key])
 
@@ -377,8 +379,13 @@ class SMIRK:
                     "SMIRK.fake_expression_list should only contain one element. "
                     "Please check your code!"
                 )
-                expression_dist = F.l1_loss(
-                    real_dict[expression_key], self.fake_expression_list.pop()
+                fake_expression = self.fake_expression_list.pop()
+                expression_dist_dict = {
+                    k: F.l1_loss(real_dict[k], fake_expression[k])
+                    for k in expression_key
+                }
+                expression_dist = torch.mean(
+                    torch.tensor(list(expression_dist_dict.values()))
                 )
                 self.expression_dist_list.append(expression_dist[None])
             if self.enable_head_pose:
