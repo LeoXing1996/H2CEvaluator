@@ -229,15 +229,18 @@ class Visualizer:
             video = transform(video)
             video = video.repeat(1, 1, 3, 1, 1)
 
-        res_video = self.draw_tracks_on_video(
-            video=video,
-            tracks=tracks,
-            visibility=visibility,
-            segm_mask=segm_mask,
-            gt_tracks=gt_tracks,
-            query_frame=query_frame,
-            compensate_for_camera_motion=compensate_for_camera_motion,
-        )
+        try:
+            res_video = self.draw_tracks_on_video(
+                video=video,
+                tracks=tracks,
+                visibility=visibility,
+                segm_mask=segm_mask,
+                gt_tracks=gt_tracks,
+                query_frame=query_frame,
+                compensate_for_camera_motion=compensate_for_camera_motion,
+            )
+        except Exception:
+            res_video = torch.zeros_like(video)
         if save_video:
             self.save_video(res_video, filename=filename, writer=writer, step=step)
         return res_video
