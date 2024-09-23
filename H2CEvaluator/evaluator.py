@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing import Dict, List, Optional, Union
 import simplejson as json
 
+import cv2
 import numpy as np
 import torch
 from accelerate import PartialState
@@ -194,6 +195,78 @@ class Evaluator:
 
         return dataloader
 
+    @staticmethod
+    def get_save_name(
+        vis_save_path: str,
+        save_as_frames: bool,
+        idx: int,
+        save_name: Optional[str] = None,
+    ):
+        """Function to get save name for current sample."""
+
+        if save_name is None:
+            if PartialState().use_distributed:
+                save_name = f"{idx}_rank{PartialState().local_process_index}.mp4"
+            else:
+                save_name = f"{idx}.mp4"
+        return os.path.join(vis_save_path, save_name)
+
+    @staticmethod
+    def get_save_name_list(
+        vis_save_path: str,
+        save_as_frames: bool,
+        idx: int,
+        save_name_list: Optional[List[str]] = None,
+        n_frames: Optional[int] = None,
+    ):
+        """Function to get save name list for current sample."""
+
+        if save_name_list is None:
+            if PartialState().use_distributed:
+                save_name_template = (
+                    f"{idx}_{{}}_rank{PartialState().local_process_index}.png"
+                )
+            else:
+                save_name_template = f"{idx}_{{}}.png"
+            save_name_list = [save_name_template.format(j) for j in range(n_frames)]
+        return [os.path.join(vis_save_path, save_name) for save_name in save_name_list]
+
+    @staticmethod
+    def resume_from_saved_samples(
+        save_as_frames: bool,
+        save_name: Optional[str] = None,
+        save_name_list: Optional[List[str]] = None,
+        n_frames: Optional[int] = None,
+    ):
+        resumed_video = None
+        if save_as_frames:
+            # TODO: do not support now
+            pass
+        else:
+            if os.path.exists(save_name):
+                cap = cv2.VideoCapture(save_name)
+                frames = []
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+                cap.release()
+                resumed_video = torch.from_numpy(np.array(frames))  # [F, H, W, C]
+                resumed_video = (
+                    resumed_video.permute(0, 3, 1, 2) / 255.0
+                )  # [F, C, H, W]
+
+        if n_frames is not None and resumed_video is not None:
+            assert resumed_video.shape[0] == n_frames, ()
+
+        if resumed_video is None:
+            print(f"Did not find {save_name}")
+
+        return resumed_video.contiguous() if resumed_video is not None else None
+
     def run_eval(
         self,
         pipeline,
@@ -242,6 +315,29 @@ class Evaluator:
             reference_name = data.pop("reference_filename", "null")
             driving_name = data.pop("driving_filename", "null")
 
+            # handle resume name
+            if save_as_frames:
+                save_name_list = self.get_save_name_list(
+                    save_path,
+                    save_as_frames,
+                    idx,
+                    save_name_list,
+                    len(data["driving_video"]),
+                )
+            else:
+                save_name = self.get_save_name(
+                    save_path,
+                    save_as_frames,
+                    idx,
+                    save_name,
+                )
+            resumed_video = self.resume_from_saved_samples(
+                save_as_frames,
+                save_name,
+                save_name_list,
+                len(data["driving_video"]),
+            )
+
             meta_info = {
                 "reference_name": reference_name,
                 "driving_name": driving_name,
@@ -250,19 +346,26 @@ class Evaluator:
 
             meta_info_list.append(meta_info)
 
-            try:
-                output = pipeline(
-                    **data,
-                    **self.pipeline_kwargs,
-                )
-                video = output.videos[0]  # [F, 3, H, W]
-                cond = output.conditions[0]  # [F, 3, H, W]
+            if resumed_video is not None:
+                video = resumed_video
+                cond = None
                 meta_info["success"] = True
+                meta_info["is_resumed"] = True
 
-            except Exception as e:
-                meta_info["success"] = False
-                meta_info["exception"] = str(e)
-                continue
+            else:
+                try:
+                    output = pipeline(
+                        **data,
+                        **self.pipeline_kwargs,
+                    )
+                    video = output.videos[0]  # [F, 3, H, W]
+                    cond = output.conditions[0]  # [F, 3, H, W]
+                    meta_info["success"] = True
+
+                except Exception as e:
+                    meta_info["success"] = False
+                    meta_info["exception"] = str(e)
+                    continue
 
             # build a vis dict
             extra_vis_dict = {}
@@ -273,36 +376,20 @@ class Evaluator:
                     real_vis_dict = metric.feed_one_sample(data, mode="real")
                     extra_vis_dict.update(fake_vis_dict)
                     extra_vis_dict.update(real_vis_dict)
+
             if should_vis:
-                vis_save_path = os.path.join(save_path, "vis")
                 if save_as_frames:
-                    if save_name_list is None:
-                        if PartialState().use_distributed:
-                            save_name_template = f"{idx}_{{}}_rank{PartialState().local_process_index}.png"
-                        else:
-                            save_name_template = f"{idx}_{{}}.png"
-                        save_name_list = [
-                            os.path.join(vis_save_path, save_name_template.format(j))
-                            for j in range(video.shape[0])
-                        ]
                     self.save_video_frames(
                         video, cond, data, extra_vis_dict, save_name_list
                     )
                     meta_info["save_name_list"] = save_name_list
                 else:
-                    if save_name is None:
-                        if PartialState().use_distributed:
-                            save_name = (
-                                f"{idx}_rank{PartialState().local_process_index}.mp4"
-                            )
-                        else:
-                            save_name = f"{idx}.mp4"
                     self.save_video(
                         video,
                         cond,
                         data,
                         extra_vis_dict,
-                        os.path.join(save_path, save_name),
+                        save_name,
                     )
                     meta_info["save_name"] = save_name
 
