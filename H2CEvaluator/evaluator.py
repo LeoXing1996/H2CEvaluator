@@ -437,7 +437,10 @@ class Evaluator:
         +-------+---------+------+-----+-------+
         """
         video = video.permute(0, 2, 3, 1)
-        cond = cond.permute(0, 2, 3, 1)
+        if cond is not None:
+            cond = cond.permute(0, 2, 3, 1)
+        else:
+            cond = torch.zeros_like(video)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
@@ -495,7 +498,10 @@ class Evaluator:
         +-------+---------+------+-----+-------+
         """
         video = video.permute(0, 2, 3, 1)
-        cond = cond.permute(0, 2, 3, 1)
+        if cond is not None:
+            cond = cond.permute(0, 2, 3, 1)
+        else:
+            cond = torch.zeros_like(video)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
