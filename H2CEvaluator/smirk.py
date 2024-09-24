@@ -385,7 +385,7 @@ class SMIRK:
                     for k in expression_key
                 }
                 expression_dist = torch.mean(
-                    torch.tensor(list(expression_dist_dict.values()))
+                    torch.cat([d[None] for d in expression_dist_dict.values()])
                 )
                 self.expression_dist_list.append(expression_dist[None])
             if self.enable_head_pose:
