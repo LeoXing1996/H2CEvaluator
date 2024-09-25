@@ -395,10 +395,13 @@ class Evaluator:
 
             pbar.update(1)
 
-        result = {}
-        for metric in self.metric_list:
-            metric_res = metric.run_evaluation()
-            result.update(metric_res)
+        if should_eval:
+            result = {}
+            for metric in self.metric_list:
+                metric_res = metric.run_evaluation()
+                result.update(metric_res)
+        else:
+            result = "No Evaluation"
 
         # gather sync meta-info across device
         if PartialState().use_distributed:
@@ -416,6 +419,7 @@ class Evaluator:
                     {"result": result, "meta_info": meta_info_list},
                     file,
                     indent=4,
+                    allow_nan=True,
                 )
 
         return result
