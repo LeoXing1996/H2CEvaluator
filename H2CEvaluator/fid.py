@@ -154,7 +154,7 @@ class FID:
             )
             self.fake_feat_list.append(fake_feat)
 
-            return {}
+            return {}, {}
 
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"])  # [f, h, w, c]
@@ -170,7 +170,7 @@ class FID:
             )
             self.real_feat_list.append(real_feat)
 
-            return {}
+            return {}, {}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

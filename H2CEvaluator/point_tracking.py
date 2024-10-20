@@ -221,6 +221,7 @@ class PointTracking:
             )
             self.fake_track_list.append(pred_tracking)
 
+            vis_dict = {}
             if self.enable_vis:
                 fake_tracking_vis = self.visualier.visualize(
                     fake_sample[None],  # [1, F, C, H, W]
@@ -232,9 +233,8 @@ class PointTracking:
                     frame.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for frame in fake_tracking_vis
                 ]
-                return {"tracking_fake": fake_tracking_np_list}
-            else:
-                return {}
+                vis_dict = {"tracking_fake": fake_tracking_np_list}
+            return vis_dict, {}
 
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"], axis=0)  # [f, h, w, c]
@@ -266,6 +266,7 @@ class PointTracking:
             )
             self.distance_list.append(tracking_distance[None])
 
+            vis_dict = {}
             if self.enable_vis:
                 real_tracking_vis = self.visualier.visualize(
                     driving_sample[None],  # [1, F, C, H, W]
@@ -277,8 +278,8 @@ class PointTracking:
                     frame.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for frame in real_tracking_vis
                 ]
-                return {"tracking_real": real_tracking_np_list}
-            else:
-                return {}
+                vis_dict = {"tracking_real": real_tracking_np_list}
+
+            return vis_dict, {"point_tracking": tracking_distance.item()}
         else:
             raise ValueError(f"Do not support mode {mode}.")

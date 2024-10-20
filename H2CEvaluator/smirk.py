@@ -357,9 +357,9 @@ class SMIRK:
                     (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for ten in tensor_to_vis
                 ]
-                return {f"{vis_key}_fake": vis_list}
+                return {f"{vis_key}_fake": vis_list}, {}
             else:
-                return {}
+                return {}, {}
 
         elif mode == "real":
             real_dict_list = []
@@ -373,6 +373,7 @@ class SMIRK:
                 k: torch.cat([d[k] for d in real_dict_list], dim=0) for k in keys
             }
 
+            item_res_dict = {}
             if self.enable_expression:
                 assert len(self.fake_expression_list) == 1, (
                     "When call feed_one_sample with mode `real`, "
@@ -388,6 +389,8 @@ class SMIRK:
                     torch.cat([d[None] for d in expression_dist_dict.values()])
                 )
                 self.expression_dist_list.append(expression_dist[None])
+                item_res_dict["expression_dist"] = expression_dist.item()
+
             if self.enable_head_pose:
                 assert len(self.fake_head_pose_list) == 1, (
                     "When call feed_one_sample with mode `real`, "
@@ -398,6 +401,7 @@ class SMIRK:
                     real_dict[headpose_key], self.fake_head_pose_list.pop()
                 )
                 self.head_pose_dist_list.append(head_pose_dist[None])
+                item_res_dict["head_pose_dist"] = head_pose_dist.item()
 
             # return item (maybe items) for visualization
             if self.enable_vis:
@@ -406,8 +410,8 @@ class SMIRK:
                     (ten * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     for ten in tensor_to_vis
                 ]
-                return {f"{vis_key}_real": vis_list}
+                return {f"{vis_key}_real": vis_list}, item_res_dict
             else:
-                return {}
+                return {}, item_res_dict
         else:
             raise ValueError(f"Do not support mode {mode}.")

@@ -61,6 +61,8 @@ class ArcFace:
             )
             self.fake_feat.append(F.normalize(fake_feat))
 
+            return {}, {}
+
         elif mode == "real":
             ref_samples = torch.from_numpy(sample["reference_image"])  # [H, W, 3]
             ref_samples = ref_samples[None].permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -81,8 +83,8 @@ class ArcFace:
             ).mean()
             self.arcface_dist_list.append(arcface_dist[None])
 
+            # no intermedia results for visualization, return empty dict
+            return {}, {"arcface": arcface_dist.item()}
+
         else:
             raise ValueError(f"Do not support mode {mode}.")
-
-        # no intermedia results for visualization, return empty dict
-        return {}

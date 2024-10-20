@@ -3,7 +3,6 @@ from copy import deepcopy
 from typing import Dict, List, Optional, Union
 import simplejson as json
 
-import cv2
 import numpy as np
 import torch
 from accelerate import PartialState
@@ -14,7 +13,9 @@ from PIL import Image
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.distributed import DistributedSampler
+from .save_utils import resume_from_saved_samples
 import logging
+
 
 METRIC_CONFIG_TYPE = Optional[List[Union[str, dict]]]
 
@@ -231,42 +232,6 @@ class Evaluator:
             save_name_list = [save_name_template.format(j) for j in range(n_frames)]
         return [os.path.join(vis_save_path, save_name) for save_name in save_name_list]
 
-    @staticmethod
-    def resume_from_saved_samples(
-        save_as_frames: bool,
-        save_name: Optional[str] = None,
-        save_name_list: Optional[List[str]] = None,
-        n_frames: Optional[int] = None,
-    ):
-        resumed_video = None
-        if save_as_frames:
-            # TODO: do not support now
-            pass
-        else:
-            if os.path.exists(save_name):
-                cap = cv2.VideoCapture(save_name)
-                frames = []
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-
-                    frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-
-                cap.release()
-                resumed_video = torch.from_numpy(np.array(frames))  # [F, H, W, C]
-                resumed_video = (
-                    resumed_video.permute(0, 3, 1, 2) / 255.0
-                )  # [F, C, H, W]
-
-        if n_frames is not None and resumed_video is not None:
-            assert resumed_video.shape[0] == n_frames, ()
-
-        if resumed_video is None:
-            print(f"Did not find {save_name}")
-
-        return resumed_video.contiguous() if resumed_video is not None else None
-
     def run_eval(
         self,
         pipeline,
@@ -302,6 +267,7 @@ class Evaluator:
             return {}
 
         meta_info_list = []
+        should_eval = False
         for idx, data in enumerate(self.dataloader):
             should_eval = (eval_samples == -1 or idx < eval_samples) and not no_eval
             should_vis = (vis_samples == -1 or idx < vis_samples) and not no_vis
@@ -310,8 +276,8 @@ class Evaluator:
                 break
 
             # handle save_name
-            save_name = data.pop("save_name", None)
-            save_name_list = data.pop("save_name_list", None)
+            save_name = data.get("save_name", None)
+            save_name_list = data.get("save_name_list", None)
             reference_name = data.pop("reference_filename", "null")
             driving_name = data.pop("driving_filename", "null")
 
@@ -331,7 +297,8 @@ class Evaluator:
                     idx,
                     save_name,
                 )
-            resumed_video = self.resume_from_saved_samples(
+
+            resumed_video, resumed_cond = resume_from_saved_samples(
                 save_as_frames,
                 save_name,
                 save_name_list,
@@ -348,7 +315,7 @@ class Evaluator:
 
             if resumed_video is not None:
                 video = resumed_video
-                cond = None
+                cond = resumed_cond
                 meta_info["success"] = True
                 meta_info["is_resumed"] = True
 
@@ -363,8 +330,10 @@ class Evaluator:
                     meta_info["success"] = True
 
                 except Exception as e:
+                    print(e)
                     meta_info["success"] = False
                     meta_info["exception"] = str(e)
+                    pbar.update(1)
                     continue
 
             # build a vis dict
@@ -372,25 +341,31 @@ class Evaluator:
 
             if should_eval:
                 for metric in self.metric_list:
-                    fake_vis_dict = metric.feed_one_sample(video, mode="fake")
-                    real_vis_dict = metric.feed_one_sample(data, mode="real")
+                    fake_vis_dict, fake_info = metric.feed_one_sample(
+                        video, mode="fake"
+                    )
+                    real_vis_dict, real_info = metric.feed_one_sample(data, mode="real")
                     extra_vis_dict.update(fake_vis_dict)
                     extra_vis_dict.update(real_vis_dict)
+                    meta_info.update(fake_info)
+                    meta_info.update(real_info)
 
             if should_vis:
                 if save_as_frames:
-                    self.save_video_frames(
-                        video, cond, data, extra_vis_dict, save_name_list
-                    )
+                    if resumed_video is None:
+                        self.save_video_frames(
+                            video, cond, data, extra_vis_dict, save_name_list
+                        )
                     meta_info["save_name_list"] = save_name_list
                 else:
-                    self.save_video(
-                        video,
-                        cond,
-                        data,
-                        extra_vis_dict,
-                        save_name,
-                    )
+                    if resumed_video is None:
+                        self.save_video(
+                            video,
+                            cond,
+                            data,
+                            extra_vis_dict,
+                            save_name,
+                        )
                     meta_info["save_name"] = save_name
 
             pbar.update(1)
@@ -427,7 +402,7 @@ class Evaluator:
     def save_video_frames(
         self,
         video: torch.Tensor,
-        cond: torch.Tensor,
+        cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name_list: List[str],
@@ -480,7 +455,7 @@ class Evaluator:
             sample_combine_name = sample_name.replace(
                 f".{sample_suffix}", f"_comb.{sample_suffix}"
             )
-            os.makedirs(os.path.dirname(sample_name, exist_ok=True))
+            os.makedirs(os.path.dirname(sample_name), exist_ok=True)
 
             res_image_pil.save(sample_name)
             canvas.save(sample_combine_name)
@@ -488,7 +463,7 @@ class Evaluator:
     def save_video(
         self,
         video: torch.Tensor,
-        cond: torch.Tensor,
+        cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name: str,

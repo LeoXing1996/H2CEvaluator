@@ -71,7 +71,7 @@ class FVD(FID):
             fake_feat = self.inception(fake_sample, **self.inception_kwargs)
             self.fake_feat_list.append(fake_feat)
 
-            return {}
+            return {}, {}
 
         elif mode == "real":
             driving_sample = np.stack(sample["driving_video"]) / 255
@@ -90,7 +90,7 @@ class FVD(FID):
             real_feat = self.inception(driving_sample, **self.inception_kwargs)
             self.real_feat_list.append(real_feat)
 
-            return {}
+            return {}, {}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

@@ -81,11 +81,11 @@ class HyperIQA:
             self.iqa_scores.append(score)
 
             # no intermedia results for visualization, return empty dict
-            return {}
+            return {}, {"hyperIQA": score.item()}
 
         elif mode == "real":
             # do not need real samples, return
-            return {}
+            return {}, {}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

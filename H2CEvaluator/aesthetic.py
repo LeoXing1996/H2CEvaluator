@@ -112,12 +112,12 @@ class Aesthetic:
 
             score = self.model(im_emb)
             self.score_list.append(score)
+            return {}, {"aesthetic": score.item()}
 
         elif mode == "real":
-            pass
+            return {}, {}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")
 
         # no intermedia results for visualization, return empty dict
-        return {}
