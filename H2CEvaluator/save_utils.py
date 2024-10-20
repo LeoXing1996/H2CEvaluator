@@ -44,6 +44,9 @@ def resume_from_saved_samples(
         # TODO: do not support now
         pass
     else:
+        assert (
+            save_name is not None
+        ), '"save_name" must be passed if "save_as_frames" is False.'
         resumed_video = load_mp4_to_torch(save_name)
 
         if resumed_video is not None:
@@ -72,7 +75,8 @@ def resume_from_saved_samples(
                 print(f"{save_name} is found, but shorter than desired length. Ignore.")
             else:
                 resumed_video = resumed_video[:n_frames]
-                resumed_cond = resumed_cond[:n_frames]
+                if resumed_cond is not None:
+                    resumed_cond = resumed_cond[:n_frames]
                 print(
                     f"{save_name} is found, but longer than desired length. Truncate."
                 )

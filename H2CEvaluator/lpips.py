@@ -38,6 +38,9 @@ class LPIPS:
             fake_sample = sample * 2 - 1  # [-1., 1]
             self.fake_list.append(fake_sample)
 
+            # no intermedia results for visualization, return empty dict
+            return {}, {}
+
         elif mode == "real":
             src_samples = sample["driving_video"]
             src_samples = [
@@ -59,8 +62,8 @@ class LPIPS:
             score = self.lpips(src_samples.cuda(), fake_samples)
             self.score_list.append(score)
 
+            # no intermedia results for visualization, return empty dict
+            return {}, {"lpips": score.item()}
+
         else:
             raise ValueError(f"Do not support mode {mode}.")
-
-        # no intermedia results for visualization, return empty dict
-        return {}

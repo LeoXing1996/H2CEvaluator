@@ -13,6 +13,7 @@ from PIL import Image
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.distributed import DistributedSampler
+from .save_utils import resume_from_saved_samples
 import logging
 
 
@@ -296,8 +297,8 @@ class Evaluator:
                     idx,
                     save_name,
                 )
-            # TODO: support resume condition
-            resumed_video, resumed_cond = self.resume_from_saved_samples(
+
+            resumed_video, resumed_cond = resume_from_saved_samples(
                 save_as_frames,
                 save_name,
                 save_name_list,
@@ -340,10 +341,14 @@ class Evaluator:
 
             if should_eval:
                 for metric in self.metric_list:
-                    fake_vis_dict = metric.feed_one_sample(video, mode="fake")
-                    real_vis_dict = metric.feed_one_sample(data, mode="real")
+                    fake_vis_dict, fake_info = metric.feed_one_sample(
+                        video, mode="fake"
+                    )
+                    real_vis_dict, real_info = metric.feed_one_sample(data, mode="real")
                     extra_vis_dict.update(fake_vis_dict)
                     extra_vis_dict.update(real_vis_dict)
+                    meta_info.update(fake_info)
+                    meta_info.update(real_info)
 
             if should_vis:
                 if save_as_frames:
@@ -397,7 +402,7 @@ class Evaluator:
     def save_video_frames(
         self,
         video: torch.Tensor,
-        cond: torch.Tensor,
+        cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name_list: List[str],
@@ -458,7 +463,7 @@ class Evaluator:
     def save_video(
         self,
         video: torch.Tensor,
-        cond: torch.Tensor,
+        cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name: str,
