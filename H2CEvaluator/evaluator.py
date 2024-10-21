@@ -241,7 +241,7 @@ class Evaluator:
         eval_samples: int = -1,
         vis_samples: int = -1,
         save_as_frames: bool = False,
-        algin: bool = True,
+        align: bool = True,
         preprocessor=None,
     ):
         """
@@ -324,7 +324,13 @@ class Evaluator:
             else:
                 try:
                     if align and preprocessor is not None:
-                        data["pose_cond"] = preprocessor.run_align(data["reference_image"], data["pose_cond"], data["driving_video"], drv_type="raw", align_type="affine")
+                        data["pose_cond"] = preprocessor.run_align(
+                            data["reference_image"],
+                            data["pose_cond"],
+                            data["driving_video"],
+                            drv_type="raw",
+                            align_type="affine",
+                        )
                         output = pipeline(
                             **data,
                             **self.pipeline_kwargs,
