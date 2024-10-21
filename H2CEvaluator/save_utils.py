@@ -39,7 +39,7 @@ def resume_from_saved_samples(
     save_name_list: Optional[List[str]] = None,
     n_frames: Optional[int] = None,
 ):
-    resumed_video = None
+    resumed_video = resumed_cond = None
     if save_as_frames:
         # TODO: do not support now
         pass
