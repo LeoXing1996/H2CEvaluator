@@ -44,6 +44,7 @@ class SSIM:
         """
         if mode == "fake":
             self.fake_list.append(sample)  # [0, 1]
+            return {}, {}
 
         elif mode == "real":
             src_samples = sample["driving_video"]
@@ -67,8 +68,7 @@ class SSIM:
             score = self.ssim(src_samples.cuda(), fake_samples)
             self.score_list.append(score[None])
 
+            return {}, {"ssim": score.item()}
+
         else:
             raise ValueError(f"Do not support mode {mode}.")
-
-        # no intermedia results for visualization, return empty dict
-        return {}
