@@ -55,6 +55,7 @@ class Evaluator:
     ):
         self.metric_list = self.build_metrics(metric_list, dataset)
 
+        self.dataset = dataset
         self.dataloader = self.build_dataloader(dataset)
 
         if pipeline_kwargs is None:
@@ -268,12 +269,22 @@ class Evaluator:
 
         meta_info_list = []
         should_eval = False
+
         for idx, data in enumerate(self.dataloader):
             should_eval = (eval_samples == -1 or idx < eval_samples) and not no_eval
             should_vis = (vis_samples == -1 or idx < vis_samples) and not no_vis
 
             if not should_eval and not should_vis:
                 break
+
+            duplicate = False
+            if PartialState().use_distributed:
+                data_len = (
+                    PartialState().num_processes * idx
+                    + PartialState().local_process_index
+                )
+                if data_len >= len(self.dataset):
+                    duplicate = True
 
             # handle save_name
             save_name = data.get("save_name", None)
@@ -309,9 +320,11 @@ class Evaluator:
                 "reference_name": reference_name,
                 "driving_name": driving_name,
                 "used_for_eval": should_eval,
+                "frame_indices": data["frame_indices"],
             }
 
-            meta_info_list.append(meta_info)
+            if not duplicate:
+                meta_info_list.append(meta_info)
 
             if resumed_video is not None:
                 video = resumed_video
@@ -341,10 +354,13 @@ class Evaluator:
 
             if should_eval:
                 for metric in self.metric_list:
+                    # duplicate sample not count for the metric evaluation
                     fake_vis_dict, fake_info = metric.feed_one_sample(
-                        video, mode="fake"
+                        video, mode="fake", duplicate=duplicate
                     )
-                    real_vis_dict, real_info = metric.feed_one_sample(data, mode="real")
+                    real_vis_dict, real_info = metric.feed_one_sample(
+                        data, mode="real", duplicate=duplicate
+                    )
                     extra_vis_dict.update(fake_vis_dict)
                     extra_vis_dict.update(real_vis_dict)
                     meta_info.update(fake_info)
@@ -352,13 +368,13 @@ class Evaluator:
 
             if should_vis:
                 if save_as_frames:
-                    if resumed_video is None:
+                    if resumed_video is None and not duplicate:
                         self.save_video_frames(
                             video, cond, data, extra_vis_dict, save_name_list
                         )
                     meta_info["save_name_list"] = save_name_list
                 else:
-                    if resumed_video is None:
+                    if resumed_video is None and not duplicate:
                         self.save_video(
                             video,
                             cond,

@@ -26,7 +26,7 @@ class LPIPS:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """Feed one sample.
         Args:
             sample (torch.Tensor | dict): If sample is tensor, sample should be
@@ -60,10 +60,11 @@ class LPIPS:
                 fake_samples = F.interpolate(fake_samples, src_samples.shape[-2:])
 
             score = self.lpips(src_samples.cuda(), fake_samples)
-            self.score_list.append(score)
+            if not duplicate:
+                self.score_list.append(score)
 
             # no intermedia results for visualization, return empty dict
-            return {}, {"lpips": score.item()}
+            return {}, {"lpips": score.squeeze().data.cpu().numpy().tolist()}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

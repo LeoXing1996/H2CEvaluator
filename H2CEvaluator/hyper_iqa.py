@@ -59,7 +59,7 @@ class HyperIQA:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: torch.Tensor, mode: str):
+    def feed_one_sample(self, sample: torch.Tensor, mode: str, duplicate: bool = False):
         """Feed one sample.
 
         Args:
@@ -77,11 +77,12 @@ class HyperIQA:
                 pred = model_target(paras["target_in_vec"])
                 pred_scores.append(pred)
 
-            score = torch.mean(torch.cat(pred_scores), dim=0, keepdim=True)
-            self.iqa_scores.append(score)
+            score = torch.cat(pred_scores)
+            if not duplicate:
+                self.iqa_scores.append(score.mean(dim=0, keepdim=True))
 
             # no intermedia results for visualization, return empty dict
-            return {}, {"hyperIQA": score.item()}
+            return {}, {"hyperIQA": score.squeeze().data.cpu().numpy().tolist()}
 
         elif mode == "real":
             # do not need real samples, return

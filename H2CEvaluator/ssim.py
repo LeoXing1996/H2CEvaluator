@@ -20,7 +20,7 @@ SAMPLE_TYPE = Union[torch.Tensor, dict]
 
 class SSIM:
     def __init__(self):
-        self.ssim = SSIM_Metric(data_range=1.0, size_average=True, channel=3).cuda()
+        self.ssim = SSIM_Metric(data_range=1.0, size_average=False, channel=3).cuda()
         self.fake_list = []
         self.score_list = []
 
@@ -34,7 +34,7 @@ class SSIM:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """Feed one sample.
         Args:
             sample (torch.Tensor | dict): If sample is tensor, sample should be
@@ -44,6 +44,8 @@ class SSIM:
         """
         if mode == "fake":
             self.fake_list.append(sample)  # [0, 1]
+
+            return {}, {}
 
         elif mode == "real":
             src_samples = sample["driving_video"]
@@ -65,10 +67,9 @@ class SSIM:
                 fake_samples = F.interpolate(fake_samples, src_samples.shape[-2:])
 
             score = self.ssim(src_samples.cuda(), fake_samples)
-            self.score_list.append(score[None])
+            if not duplicate:
+                self.score_list.append(score)
 
+            return {}, {"ssim": score.squeeze().data.cpu().numpy().tolist()}
         else:
             raise ValueError(f"Do not support mode {mode}.")
-
-        # no intermedia results for visualization, return empty dict
-        return {}

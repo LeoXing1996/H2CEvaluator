@@ -44,7 +44,7 @@ class ArcFace:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """Feed one sample.
 
         Args:
@@ -80,11 +80,12 @@ class ArcFace:
 
             arcface_dist = F.cosine_similarity(
                 self.fake_feat.pop(), F.normalize(real_feat), dim=1
-            ).mean()
-            self.arcface_dist_list.append(arcface_dist[None])
+            )
+            if not duplicate:
+                self.arcface_dist_list.append(arcface_dist.mean(dim=0, keepdim=True))
 
             # no intermedia results for visualization, return empty dict
-            return {}, {"arcface": arcface_dist.item()}
+            return {}, {"arcface": arcface_dist.squeeze().data.cpu().numpy().tolist()}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

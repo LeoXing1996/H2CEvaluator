@@ -44,7 +44,7 @@ class FVD(FID):
         self.real_mean = self.real_cov = None
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """
         Args:
             sample (torch.Tensor | dict): If sample is tensor, sample should be
@@ -88,7 +88,8 @@ class FVD(FID):
             )[None]  # [1, c, f, 224, 224]
             driving_sample = driving_sample * 2 - 1
             real_feat = self.inception(driving_sample, **self.inception_kwargs)
-            self.real_feat_list.append(real_feat)
+            if not duplicate:
+                self.real_feat_list.append(real_feat)
 
             return {}, {}
 

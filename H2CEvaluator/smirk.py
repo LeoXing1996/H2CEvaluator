@@ -319,7 +319,7 @@ class SMIRK:
         return result_dict
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """Feed one sample.
 
         Args:
@@ -382,14 +382,24 @@ class SMIRK:
                 )
                 fake_expression = self.fake_expression_list.pop()
                 expression_dist_dict = {
-                    k: F.l1_loss(real_dict[k], fake_expression[k])
+                    k: F.l1_loss(real_dict[k], fake_expression[k], reduce=None)
                     for k in expression_key
                 }
                 expression_dist = torch.mean(
-                    torch.cat([d[None] for d in expression_dist_dict.values()])
+                    torch.cat(
+                        [
+                            d.mean(dim=list(range(1, d.dim()))).view(d.dim(0), 1)
+                            for d in expression_dist_dict.values()
+                        ],
+                        dim=1,
+                    ),
+                    dim=1,
                 )
-                self.expression_dist_list.append(expression_dist[None])
-                item_res_dict["expression_dist"] = expression_dist.item()
+                if not duplicate:
+                    self.expression_dist_list.append(expression_dist)
+                item_res_dict["expression_dist"] = (
+                    expression_dist.squeeze().data.cpu().numpy().tolist()
+                )
 
             if self.enable_head_pose:
                 assert len(self.fake_head_pose_list) == 1, (
@@ -398,10 +408,16 @@ class SMIRK:
                     "Please check your code!"
                 )
                 head_pose_dist = F.l1_loss(
-                    real_dict[headpose_key], self.fake_head_pose_list.pop()
+                    real_dict[headpose_key], self.fake_head_pose_list.pop(), reduce=None
                 )
-                self.head_pose_dist_list.append(head_pose_dist[None])
-                item_res_dict["head_pose_dist"] = head_pose_dist.item()
+                head_pose_dist = head_pose_dist.mean(
+                    dim=list(range(1, head_pose_dist.dim()))
+                )
+                if not duplicate:
+                    self.head_pose_dist_list.append(head_pose_dist)
+                item_res_dict["head_pose_dist"] = (
+                    head_pose_dist.squeeze().data.cpu().numpy().tolist()
+                )
 
             # return item (maybe items) for visualization
             if self.enable_vis:

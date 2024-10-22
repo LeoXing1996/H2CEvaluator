@@ -200,7 +200,7 @@ class PointTracking:
         return diff_distance
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """Feed one sample.
         Args:
             sample (torch.Tensor | dict): If sample is tensor, sample should be
@@ -264,7 +264,8 @@ class PointTracking:
                 fake_pred_tracking,
                 enable_retargeting=True,
             )
-            self.distance_list.append(tracking_distance[None])
+            if not duplicate:
+                self.distance_list.append(tracking_distance[None])
 
             vis_dict = {}
             if self.enable_vis:

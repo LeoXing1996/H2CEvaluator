@@ -95,7 +95,7 @@ class Aesthetic:
         return a / np.expand_dims(l2, axis)
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: torch.Tensor, mode: str):
+    def feed_one_sample(self, sample: torch.Tensor, mode: str, duplicate: bool = False):
         """Feed one sample.
 
         Args:
@@ -111,8 +111,9 @@ class Aesthetic:
             im_emb = torch.from_numpy(im_emb_arr).cuda().type(torch.cuda.FloatTensor)
 
             score = self.model(im_emb)
-            self.score_list.append(score)
-            return {}, {"aesthetic": score.item()}
+            if not duplicate:
+                self.score_list.append(score)
+            return {}, {"aesthetic": score.squeeze().data.cpu().numpy().tolist()}
 
         elif mode == "real":
             return {}, {}

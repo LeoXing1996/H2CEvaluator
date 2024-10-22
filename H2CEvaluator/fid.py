@@ -130,7 +130,7 @@ class FID:
         }
 
     @torch.no_grad()
-    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str):
+    def feed_one_sample(self, sample: SAMPLE_TYPE, mode: str, duplicate: bool = False):
         """
         Feed one sample, forward inception network, and save to the feature list.
 
@@ -168,7 +168,8 @@ class FID:
                 driving_sample,
                 **self.inception_kwargs,
             )
-            self.real_feat_list.append(real_feat)
+            if not duplicate:
+                self.real_feat_list.append(real_feat)
 
             return {}, {}
 
