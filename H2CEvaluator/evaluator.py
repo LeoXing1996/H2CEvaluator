@@ -241,6 +241,8 @@ class Evaluator:
         eval_samples: int = -1,
         vis_samples: int = -1,
         save_as_frames: bool = False,
+        align: bool = True,
+        preprocessor=None,
     ):
         """
         Here we assume all metrics use the same types of data pair
@@ -321,10 +323,24 @@ class Evaluator:
 
             else:
                 try:
-                    output = pipeline(
-                        **data,
-                        **self.pipeline_kwargs,
-                    )
+                    if align and preprocessor is not None:
+                        data["pose_cond"] = preprocessor.run_align(
+                            data["reference_image"],
+                            data["pose_cond"],
+                            data["driving_video"],
+                            drv_type="raw",
+                            align_type="affine",
+                        )
+                        output = pipeline(
+                            **data,
+                            **self.pipeline_kwargs,
+                        )
+                    else:
+                        output = pipeline(
+                            **data,
+                            **self.pipeline_kwargs,
+                            align=align,
+                        )
                     video = output.videos[0]  # [F, 3, H, W]
                     cond = output.conditions[0]  # [F, 3, H, W]
                     meta_info["success"] = True
