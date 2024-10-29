@@ -35,6 +35,13 @@ def custom_collate_fn(batch):
     return batch[0]
 
 
+def batch_decode_pipe_out(video):
+    video = video.permute(0, 2, 3, 1) * 255
+    video = video.numpy().astype(np.uint8)
+    video = [frame for frame in video]
+    return video
+
+
 class Evaluator:
     """
     Evaluator for Human2Character task.
@@ -242,6 +249,8 @@ class Evaluator:
         eval_samples: int = -1,
         vis_samples: int = -1,
         save_as_frames: bool = False,
+        self_consistent: bool = False,
+        overwrite: bool = False,
     ):
         """
         Here we assume all metrics use the same types of data pair
@@ -269,6 +278,7 @@ class Evaluator:
 
         meta_info_list = []
         should_eval = False
+        should_vis = False
 
         for idx, data in enumerate(self.dataloader):
             should_eval = (eval_samples == -1 or idx < eval_samples) and not no_eval
@@ -285,6 +295,10 @@ class Evaluator:
                 )
                 if data_len >= len(self.dataset):
                     duplicate = True
+
+            if self_consistent:
+                sc_data = deepcopy(data)
+                sc_data["reference_image"] = data["driving_video"][0]
 
             # handle save_name
             save_name = data.get("save_name", None)
@@ -309,12 +323,17 @@ class Evaluator:
                     save_name,
                 )
 
-            resumed_video, resumed_cond = resume_from_saved_samples(
-                save_as_frames,
-                save_name,
-                save_name_list,
-                len(data["driving_video"]),
-            )
+            if overwrite:
+                resumed_video = resumed_sc_video = resumed_cond = resumed_sc_cond = None
+            else:
+                resumed_video, resumed_sc_video, resumed_cond, resumed_sc_cond = (
+                    resume_from_saved_samples(
+                        save_as_frames,
+                        save_name,
+                        save_name_list,
+                        len(data["driving_video"]),
+                    )
+                )
 
             meta_info = {
                 "reference_name": reference_name,
@@ -326,21 +345,67 @@ class Evaluator:
             if not duplicate:
                 meta_info_list.append(meta_info)
 
+            # for self-consistency visualization
             if resumed_video is not None:
                 video = resumed_video
                 cond = resumed_cond
-                meta_info["success"] = True
-                meta_info["is_resumed"] = True
-
+                if self_consistent and resumed_sc_video is None:
+                    try:
+                        # animate first driving frame with reference video
+                        video_decoded = batch_decode_pipe_out(video)
+                        sc_data["driving_video"] = video_decoded
+                        output = pipeline(
+                            **sc_data,
+                            **self.pipeline_kwargs,
+                        )
+                        sc_video = output.videos[0]  # [F, 3, H, W]
+                        sc_cond = output.conditions[0]  # [F, 3, H, W]
+                        sc_data["driving_video"] = data["driving_video"]
+                        meta_info["success_sc"] = True
+                    except Exception as e:
+                        print(e)
+                        meta_info["success_sc"] = False
+                        meta_info["exception"] = str(e)
+                        pbar.update(1)
+                        continue
+                else:
+                    sc_video = resumed_sc_video
+                    sc_cond = resumed_sc_cond
+                    meta_info["success"] = True
+                    meta_info["is_resumed"] = True
             else:
                 try:
-                    output = pipeline(
-                        **data,
-                        **self.pipeline_kwargs,
-                    )
-                    video = output.videos[0]  # [F, 3, H, W]
-                    cond = output.conditions[0]  # [F, 3, H, W]
-                    meta_info["success"] = True
+                    if self_consistent:
+                        # animate reference image
+                        output = pipeline(
+                            **data,
+                            **self.pipeline_kwargs,
+                        )
+                        video = output.videos[0]
+                        cond = output.conditions[0]  # [F, 3, H, W]
+                        meta_info["success"] = True
+
+                        # animate first driving frame with reference video
+                        video_decoded = batch_decode_pipe_out(video)
+                        sc_data["driving_video"] = video_decoded
+                        output = pipeline(
+                            **sc_data,
+                            **self.pipeline_kwargs,
+                        )
+                        sc_video = output.videos[0]  # [F, 3, H, W]
+                        sc_cond = output.conditions[0]  # [F, 3, H, W]
+                        sc_data["driving_video"] = data["driving_video"]
+                        meta_info["success_sc"] = True
+                    else:
+                        output = pipeline(
+                            **data,
+                            **self.pipeline_kwargs,
+                        )
+                        video = output.videos[0]  # [F, 3, H, W]
+                        cond = output.conditions[0]  # [F, 3, H, W]
+                        sc_video = None
+                        sc_cond = None
+                        meta_info["success"] = True
 
                 except Exception as e:
                     print(e)
@@ -354,33 +419,66 @@ class Evaluator:
 
             if should_eval:
                 for metric in self.metric_list:
-                    # duplicate sample not count for the metric evaluation
-                    fake_vis_dict, fake_info = metric.feed_one_sample(
-                        video, mode="fake", duplicate=duplicate
-                    )
-                    real_vis_dict, real_info = metric.feed_one_sample(
-                        data, mode="real", duplicate=duplicate
-                    )
-                    extra_vis_dict.update(fake_vis_dict)
-                    extra_vis_dict.update(real_vis_dict)
-                    meta_info.update(fake_info)
-                    meta_info.update(real_info)
+                    if self_consistent:
+                        # duplicate sample not count for the metric evaluation
+                        fake_vis_dict, fake_info = metric.feed_one_sample(
+                            sc_video, mode="fake", duplicate=duplicate
+                        )
+                        real_vis_dict, real_info = metric.feed_one_sample(
+                            sc_data, mode="real", duplicate=duplicate
+                        )
+                        extra_vis_dict.update(fake_vis_dict)
+                        extra_vis_dict.update(real_vis_dict)
+                        meta_info.update(fake_info)
+                        meta_info.update(real_info)
+                    else:
+                        fake_vis_dict, fake_info = metric.feed_one_sample(
+                            video, mode="fake", duplicate=duplicate
+                        )
+                        real_vis_dict, real_info = metric.feed_one_sample(
+                            data, mode="real", duplicate=duplicate
+                        )
+                        extra_vis_dict.update(fake_vis_dict)
+                        extra_vis_dict.update(real_vis_dict)
+                        meta_info.update(fake_info)
+                        meta_info.update(real_info)
 
             if should_vis:
                 if save_as_frames:
-                    if resumed_video is None and not duplicate:
+                    if overwrite or (
+                        (
+                            resumed_video is None
+                            or (self_consistent and resumed_sc_video is None)
+                        )
+                        and not duplicate
+                    ):
                         self.save_video_frames(
-                            video, cond, data, extra_vis_dict, save_name_list
+                            video,
+                            sc_video,
+                            cond,
+                            sc_cond,
+                            data,
+                            extra_vis_dict,
+                            save_name_list,
                         )
                     meta_info["save_name_list"] = save_name_list
                 else:
-                    if resumed_video is None and not duplicate:
+                    if overwrite or (
+                        (
+                            resumed_video is None
+                            or (self_consistent and resumed_sc_video is None)
+                        )
+                        and not duplicate
+                    ):
                         self.save_video(
                             video,
+                            sc_video,
                             cond,
+                            sc_cond,
                             data,
                             extra_vis_dict,
                             save_name,
+                            data["fps"],
                         )
                     meta_info["save_name"] = save_name
 
@@ -404,7 +502,10 @@ class Evaluator:
             for info_list in gathered_info_list:
                 meta_info_list.extend(info_list)
         if PartialState().is_main_process:
-            result_path = os.path.join(save_path, "result.json")
+            if self_consistent:
+                result_path = os.path.join(save_path, "result_sc.json")
+            else:
+                result_path = os.path.join(save_path, "result.json")
             with open(result_path, "w") as file:
                 json.dump(
                     {"result": result, "meta_info": meta_info_list},
@@ -418,7 +519,9 @@ class Evaluator:
     def save_video_frames(
         self,
         video: torch.Tensor,
+        sc_video: Optional[torch.Tensor],
         cond: Optional[torch.Tensor],
+        sc_cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name_list: List[str],
@@ -431,22 +534,30 @@ class Evaluator:
         | Ref   | Driving | Cond | Gen | Extra |
         +-------+---------+------+-----+-------+
         """
-        video = video.permute(0, 2, 3, 1)
-        if cond is not None:
-            cond = cond.permute(0, 2, 3, 1)
-        else:
+        if sc_video is None:
+            sc_video = torch.zeros_like(video)
+        if cond is None:
             cond = torch.zeros_like(video)
+        if sc_cond is None:
+            sc_cond = torch.zeros_like(sc_cond)
+        video = batch_decode_pipe_out(video)
+        sc_video = batch_decode_pipe_out(sc_video)
+        cond = batch_decode_pipe_out(cond)
+        sc_cond = batch_decode_pipe_out(sc_cond)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
-        for i, (image, cond_image) in enumerate(zip(video, cond)):
-            res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
-            cond_image_pil = Image.fromarray(
-                (cond_image.numpy() * 255).astype(np.uint8)
-            )
+        for i, (image, sc_image, cond_image, sc_cond_image) in enumerate(
+            zip(video, sc_video, cond, sc_cond)
+        ):
+            res_image_pil = Image.fromarray(image)
+            sc_image_pil = Image.fromarray(sc_image)
+            cond_image_pil = Image.fromarray(cond_image)
+            sc_cond_image_pil = Image.fromarray(sc_cond_image)
+
             # Save ref_image, src_fimage and the generated_image
             w, h = res_image_pil.size
-            canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
+            canvas = Image.new("RGB", (w * (6 + n_extra_items), h), "white")
 
             ref_image_pil = (
                 Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
@@ -459,11 +570,13 @@ class Evaluator:
             canvas.paste(origin_image_pil, (w, 0))
             canvas.paste(cond_image_pil.resize((w, h)), (w * 2, 0))
             canvas.paste(res_image_pil, (w * 3, 0))
+            canvas.paste(sc_cond_image_pil, (w * 4, 0))
+            canvas.paste(sc_image_pil, (w * 5, 0))
 
             for k in extra_keys:
                 canvas.paste(
                     Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
-                    (w * (4 + extra_keys.index(k)), 0),
+                    (w * (6 + extra_keys.index(k)), 0),
                 )
 
             sample_name = save_name_list[i]
@@ -471,50 +584,69 @@ class Evaluator:
             sample_combine_name = sample_name.replace(
                 f".{sample_suffix}", f"_comb.{sample_suffix}"
             )
+            sample_sc_name = sample_name.replace(
+                f".{sample_suffix}", f"_sc.{sample_suffix}"
+            )
             os.makedirs(os.path.dirname(sample_name), exist_ok=True)
 
             res_image_pil.save(sample_name)
+            sc_image_pil.save(sample_sc_name)
             canvas.save(sample_combine_name)
 
     def save_video(
         self,
         video: torch.Tensor,
+        sc_video: Optional[torch.Tensor],
         cond: Optional[torch.Tensor],
+        sc_cond: Optional[torch.Tensor],
         data: Dict[str, List[np.ndarray]],
         extra_vis_dict: Dict[str, List[np.ndarray]],
         save_name: str,
+        fps: int,
     ):
         """
         Save one video.
 
         Default
-        +-------+---------+------+-----+-------+
-        | Ref   | Driving | Cond | Gen | Extra |
-        +-------+---------+------+-----+-------+
+        +-------+---------+------+-----+---------+--------+-------+
+        | Ref   | Driving | Cond | Gen | sc_Cond | sc_Gen | Extra |
+        +-------+---------+------+-----+---------+--------+-------+
         """
-        video = video.permute(0, 2, 3, 1)
-        if cond is not None:
-            cond = cond.permute(0, 2, 3, 1)
-        else:
+        if sc_video is None:
+            sc_video = torch.zeros_like(video)
+        if cond is None:
             cond = torch.zeros_like(video)
+        if sc_cond is None:
+            sc_cond = torch.zeros_like(video)
+
+        video = batch_decode_pipe_out(video)
+        sc_video = batch_decode_pipe_out(sc_video)
+        cond = batch_decode_pipe_out(cond)
+        sc_cond = batch_decode_pipe_out(sc_cond)
         extra_keys = list(extra_vis_dict.keys())
         n_extra_items = len(extra_keys)
 
         os.makedirs(os.path.dirname(save_name), exist_ok=True)
-        writer = imageio.get_writer(save_name, fps=24)
+        writer = imageio.get_writer(save_name, fps=fps)
 
         save_suffix = save_name.split(".")[-1]
         combine_name = save_name.replace(f".{save_suffix}", f"_comb.{save_suffix}")
-        writer_comb = imageio.get_writer(combine_name)
+        writer_comb = imageio.get_writer(combine_name, fps=fps)
 
-        for i, (image, cond_image) in enumerate(zip(video, cond)):
-            res_image_pil = Image.fromarray((image.numpy() * 255).astype(np.uint8))
-            cond_image_pil = Image.fromarray(
-                (cond_image.numpy() * 255).astype(np.uint8)
-            )
+        sc_name = save_name.replace(f".{save_suffix}", f"_sc.{save_suffix}")
+        writer_sc = imageio.get_writer(sc_name, fps=fps)
+
+        for i, (image, sc_image, cond_image, sc_cond_image) in enumerate(
+            zip(video, sc_video, cond, sc_cond)
+        ):
+            res_image_pil = Image.fromarray(image)
+            sc_image_pil = Image.fromarray(sc_image)
+            cond_image_pil = Image.fromarray(cond_image)
+            sc_cond_image_pil = Image.fromarray(sc_cond_image)
+
             # Save ref_image, src_fimage and the generated_image
             w, h = res_image_pil.size
-            canvas = Image.new("RGB", (w * (4 + n_extra_items), h), "white")
+            canvas = Image.new("RGB", (w * (6 + n_extra_items), h), "white")
 
             ref_image_pil = (
                 Image.fromarray(data["reference_image"]).convert("RGB").resize((w, h))
@@ -525,17 +657,22 @@ class Evaluator:
 
             canvas.paste(ref_image_pil, (0, 0))
             canvas.paste(dri_image_pil, (w, 0))
-            canvas.paste(cond_image_pil.resize((w, h)), (w * 2, 0))
+            canvas.paste(cond_image_pil.resize((w, h)), (w * 2, 0))  # [w*2, w*3]
             canvas.paste(res_image_pil, (w * 3, 0))
+            canvas.paste(sc_cond_image_pil, (w * 4, 0))  # [w*4, w*5]
+            canvas.paste(sc_image_pil, (w * 5, 0))
 
             for k in extra_keys:
                 canvas.paste(
                     Image.fromarray(extra_vis_dict[k][i]).resize((w, h)),
-                    (w * (4 + extra_keys.index(k)), 0),
+                    (w * (6 + extra_keys.index(k)), 0),
                 )
 
             img = canvas
             writer_comb.append_data(np.array(img))
             writer.append_data(np.array(res_image_pil))
+            writer_sc.append_data(np.array(sc_image_pil))
 
         writer.close()
+        writer_sc.close()
+        writer_comb.close()

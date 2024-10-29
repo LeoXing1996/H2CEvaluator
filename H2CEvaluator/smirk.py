@@ -388,7 +388,7 @@ class SMIRK:
                 expression_dist = torch.mean(
                     torch.cat(
                         [
-                            d.mean(dim=list(range(1, d.dim()))).view(d.dim(0), 1)
+                            d.view(d.size(0), -1).mean(1, keepdim=True)
                             for d in expression_dist_dict.values()
                         ],
                         dim=1,
@@ -396,10 +396,13 @@ class SMIRK:
                     dim=1,
                 )
                 if not duplicate:
-                    self.expression_dist_list.append(expression_dist)
-                item_res_dict["expression_dist"] = (
-                    expression_dist.squeeze().data.cpu().numpy().tolist()
-                )
+                    self.expression_dist_list.append(
+                        expression_dist.mean(dim=0, keepdim=True)
+                    )
+                score_frame = expression_dist.squeeze().data.cpu().numpy().tolist()
+                score_video = expression_dist.mean().item()
+                item_res_dict["expression_dist_frame"] = score_frame
+                item_res_dict["expression_dist_video"] = score_video
 
             if self.enable_head_pose:
                 assert len(self.fake_head_pose_list) == 1, (
@@ -410,14 +413,15 @@ class SMIRK:
                 head_pose_dist = F.l1_loss(
                     real_dict[headpose_key], self.fake_head_pose_list.pop(), reduce=None
                 )
-                head_pose_dist = head_pose_dist.mean(
-                    dim=list(range(1, head_pose_dist.dim()))
-                )
+                head_pose_dist = head_pose_dist.view(head_pose_dist.size(0), -1).mean(1)
                 if not duplicate:
-                    self.head_pose_dist_list.append(head_pose_dist)
-                item_res_dict["head_pose_dist"] = (
-                    head_pose_dist.squeeze().data.cpu().numpy().tolist()
-                )
+                    self.head_pose_dist_list.append(
+                        head_pose_dist.mean(dim=0, keepdim=True)
+                    )
+                score_frame = head_pose_dist.squeeze().data.cpu().numpy().tolist()
+                score_video = head_pose_dist.mean().item()
+                item_res_dict["head_pose_dist_frame"] = score_frame
+                item_res_dict["head_pose_dist_video"] = score_video
 
             # return item (maybe items) for visualization
             if self.enable_vis:

@@ -281,6 +281,6 @@ class PointTracking:
                 ]
                 vis_dict = {"tracking_real": real_tracking_np_list}
 
-            return vis_dict, {"point_tracking": tracking_distance.item()}
+            return vis_dict, {"point_tracking_video": tracking_distance.item()}
         else:
             raise ValueError(f"Do not support mode {mode}.")

@@ -68,8 +68,10 @@ class SSIM:
 
             score = self.ssim(src_samples.cuda(), fake_samples)
             if not duplicate:
-                self.score_list.append(score)
+                self.score_list.append(score.mean(dim=0, keepdim=True))
 
-            return {}, {"ssim": score.squeeze().data.cpu().numpy().tolist()}
+            score_frame = score.squeeze().data.cpu().numpy().tolist()
+            score_video = score.mean().item()
+            return {}, {"ssim_frame": score_frame, "ssim_video": score_video}
         else:
             raise ValueError(f"Do not support mode {mode}.")

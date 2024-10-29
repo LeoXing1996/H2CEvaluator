@@ -152,7 +152,8 @@ class FID:
                 fake_sample,
                 **self.inception_kwargs,
             )
-            self.fake_feat_list.append(fake_feat)
+            if not duplicate:
+                self.fake_feat_list.append(fake_feat)
 
             return {}, {}
 

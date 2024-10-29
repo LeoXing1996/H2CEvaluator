@@ -39,7 +39,7 @@ def resume_from_saved_samples(
     save_name_list: Optional[List[str]] = None,
     n_frames: Optional[int] = None,
 ):
-    resumed_video = resumed_cond = None
+    resumed_video = resumed_sc_video = resumed_cond = resumed_sc_cond = None
     if save_as_frames:
         # TODO: do not support now
         pass
@@ -51,13 +51,15 @@ def resume_from_saved_samples(
 
         if resumed_video is not None:
             save_suffix = save_name.split(".")[-1]
+
+            # resume condition
             sample_combine_name = save_name.replace(
                 f".{save_suffix}", f"_comb.{save_suffix}"
             )
             resumed_combine_video = load_mp4_to_torch(sample_combine_name)
             if resumed_combine_video is not None:
                 w = resumed_video.shape[2]
-                resumed_cond = resumed_combine_video[:, :, :, w : w * 2]
+                resumed_cond = resumed_combine_video[:, :, :, w * 2 : w * 3]
 
                 if resumed_cond.shape != resumed_video.shape:
                     print(
@@ -68,15 +70,43 @@ def resume_from_saved_samples(
             else:
                 resumed_cond = None
 
+            # resume self-consistent video
+            sample_sc_name = save_name.replace(f".{save_suffix}", f"_sc.{save_suffix}")
+            resumed_sc_video = load_mp4_to_torch(sample_sc_name)
+            if resumed_sc_video is not None:
+                if resumed_sc_video.shape != resumed_video.shape:
+                    print(
+                        f"Self-consistent video shape {resumed_sc_video.shape} does not "
+                        f"match video shape {resumed_video.shape}. Ignore."
+                    )
+                    resumed_sc_video = None
+
+            if resumed_sc_video is not None and resumed_combine_video is not None:
+                w = resumed_video.shape[2]
+                resumed_sc_cond = resumed_combine_video[:, :, :, w * 4 : w * 5]
+
+                if resumed_sc_cond.shape != resumed_video.shape:
+                    print(
+                        f"Self-consistent condition shape {resumed_sc_cond.shape} does not "
+                        f"match video shape {resumed_video.shape}. Ignore."
+                    )
+                    resumed_sc_cond = None
+            else:
+                resumed_sc_cond = None
+
     if n_frames is not None:
         if resumed_video is not None and resumed_video.shape[0] != n_frames:
             if resumed_video.shape[0] < n_frames:
-                resumed_video = resumed_cond = None
+                resumed_video = resumed_sc_video = resumed_cond = None
                 print(f"{save_name} is found, but shorter than desired length. Ignore.")
             else:
                 resumed_video = resumed_video[:n_frames]
+                if resumed_sc_video is not None:
+                    resumed_sc_video = resumed_sc_video[:n_frames]
                 if resumed_cond is not None:
                     resumed_cond = resumed_cond[:n_frames]
+                if resumed_sc_cond is not None:
+                    resumed_sc_cond = resumed_sc_cond[:n_frames]
                 print(
                     f"{save_name} is found, but longer than desired length. Truncate."
                 )
@@ -85,7 +115,11 @@ def resume_from_saved_samples(
         print(f"Did not find {save_name}")
     else:
         resumed_video = resumed_video.contiguous()
+        if resumed_sc_video is not None:
+            resumed_sc_video = resumed_sc_video.contiguous()
         if resumed_cond is not None:
             resumed_cond = resumed_cond.contiguous()
+        if resumed_sc_cond is not None:
+            resumed_sc_cond = resumed_sc_cond.contiguous()
 
-    return resumed_video, resumed_cond
+    return resumed_video, resumed_sc_video, resumed_cond, resumed_sc_cond

@@ -52,7 +52,7 @@ class LPIPS:
 
             assert len(self.fake_list) == 1, (
                 "When call feed_one_sample with mode `real`, "
-                "LPIPS.fake_list should only contain one element. Please your code!"
+                "LPIPS.fake_list should only contain one element. Please check your code!"
             )
 
             fake_samples = self.fake_list.pop().cuda()
@@ -61,10 +61,12 @@ class LPIPS:
 
             score = self.lpips(src_samples.cuda(), fake_samples)
             if not duplicate:
-                self.score_list.append(score)
+                self.score_list.append(score.mean(dim=0, keepdim=True))
 
             # no intermedia results for visualization, return empty dict
-            return {}, {"lpips": score.squeeze().data.cpu().numpy().tolist()}
+            score_frame = score.squeeze().data.cpu().numpy().tolist()
+            score_video = score.mean().item()
+            return {}, {"lpips_frame": score_frame, "lpips_video": score_video}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

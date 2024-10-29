@@ -112,8 +112,10 @@ class Aesthetic:
 
             score = self.model(im_emb)
             if not duplicate:
-                self.score_list.append(score)
-            return {}, {"aesthetic": score.squeeze().data.cpu().numpy().tolist()}
+                self.score_list.append(score.mean(dim=0, keepdim=True))
+            score_frame = score.squeeze().data.cpu().numpy().tolist()
+            score_video = score.mean().item()
+            return {}, {"aesthetic_frame": score_frame, "aesthetic_video": score_video}
 
         elif mode == "real":
             return {}, {}

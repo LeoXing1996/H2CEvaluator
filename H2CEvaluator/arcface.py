@@ -85,7 +85,9 @@ class ArcFace:
                 self.arcface_dist_list.append(arcface_dist.mean(dim=0, keepdim=True))
 
             # no intermedia results for visualization, return empty dict
-            return {}, {"arcface": arcface_dist.squeeze().data.cpu().numpy().tolist()}
+            score_frame = arcface_dist.squeeze().data.cpu().numpy().tolist()
+            score_video = arcface_dist.mean().item()
+            return {}, {"arcface_frame": score_frame, "arcface_video": score_video}
 
         else:
             raise ValueError(f"Do not support mode {mode}.")

@@ -69,7 +69,8 @@ class FVD(FID):
             )[None]  # [1, c, f, 224, 224]
             fake_sample = fake_sample * 2 - 1
             fake_feat = self.inception(fake_sample, **self.inception_kwargs)
-            self.fake_feat_list.append(fake_feat)
+            if not duplicate:
+                self.fake_feat_list.append(fake_feat)
 
             return {}, {}
 
